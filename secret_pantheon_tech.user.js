@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.4
+// @version      2026-11-09.5
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -484,6 +484,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     }
     const isMineIn = (g, mine) => g.sides.some(s => isMine(s, mine));
 
+    // the platform's tiers (rating.js) plus our Challenger at 2800+
+    const PLATFORM_TIERS = [[2600, '#cf4848'], [2400, '#e36db6'], [2200, '#ad7dbb'], [2000, '#648dcb'], [1800, '#45a28d'], [1600, '#b99a3c'], [1400, '#8c9eac'], [0, '#b58159']];
+    const tierHex = r => r >= 2800 ? '#3fb4ff' : PLATFORM_TIERS.find(([m]) => r >= m)[1];
     // opt.run: the row stands for a run of matches; clicking it toggles them instead of opening a match
     function renderRow(g, ctx, opt = {}) {
         const [L, R] = orient(g, ctx);
@@ -512,6 +515,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         const name = (s, side, won) => {
             const ver = s.version != null ? h('span', { class: 'cbc-tag', style: `margin:0 ${side === 'l' ? '0 0 5px' : '5px 0 0'}`, title: 'bot version' }, 'v' + s.version) : null;
             const a = link(`/game/team/${s.teamId}`, '', s.teamName);
+            // team names in their rank tier's colour, like the ladder: rating at the time, else the current one
+            const r = s.ratingBefore ?? ctx.ladder?.get(s.teamId)?.rating;
+            if (r != null) { const ink = tierInk(tierHex(r), document.documentElement.dataset.theme === 'dark'); if (ink) { a.style.color = ink; a.dataset.cbcR = Math.round(r); } }
             return h('span', { class: `nm ${side}${isMine(s, ctx.mine) ? ' me' : ''}` },
                 ...(side === 'l' ? [ver, won ? crown() : null, a] : [a, won ? crown() : null, ver]));
         };
@@ -2107,33 +2113,25 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     }
 
     // ---------------------------------------------------------------- rank icons
-    // The platform draws every tier from Platinum up with the same hex. Ours get more elaborate going up (owner, 11-09):
-    // Diamond a faceted gem, Candidate Master side blades, Master wings and a crown, Grandmaster a double frame and
-    // swept wings, and a custom Challenger tier at 2800+ (blue, gold crown and gold core). The platform's svg stays in the
-    // DOM (React owns it), hidden; ours sits beside it.
-    const RANK_HEX = 'm12 2 8 5v10l-8 5-8-5V7Z';
+    // The platform draws every tier from Platinum up with the same hex. From Master up ours add to it, never changing its
+    // strokes (owner, 11-09): Master small wings, Grandmaster swept wings and a crown, and a custom Challenger tier at
+    // 2800+ (blue, gold crown, gold core). The platform's svg stays in the DOM (React owns it), hidden; ours sits beside it.
+    const RANK_BASE = '<path d="m12 2 8 5v10l-8 5-8-5V7Z" fill="currentColor" fill-opacity=".12"/><path d="m7 13 5-6 5 6-5 4Z"/><path d="m8 19 4-2 4 2"/>';
     const RANK_ICONS = {
-      // platform's (for reference): Platinum
-      platinum: `<path d="${RANK_HEX}" fill="currentColor" fill-opacity=".12"/><path d="m7 13 5-6 5 6-5 4Z"/><path d="m8 19 4-2 4 2"/>`,
-      // Diamond: faceted gem, double chevron
-      diamond: `<path d="${RANK_HEX}" fill="currentColor" fill-opacity=".12"/><path d="M8.2 10.2 12 5.8l3.8 4.4L12 16.6Z" fill="currentColor" fill-opacity=".28"/><path d="M8.2 10.2h7.6M12 5.8v10.8" stroke-width="1"/><path d="m8.5 18.6 3.5-1.6 3.5 1.6"/>`,
-      // Candidate Master: diamond + side blades
-      cm: `<path d="${RANK_HEX}" fill="currentColor" fill-opacity=".14"/><path d="M8.2 10.2 12 5.8l3.8 4.4L12 16.6Z" fill="currentColor" fill-opacity=".3"/><path d="M8.2 10.2h7.6M12 5.8v10.8" stroke-width="1"/><path d="m8.5 18.6 3.5-1.6 3.5 1.6"/><path d="M4 9.5 1.6 12 4 14.5M20 9.5l2.4 2.5-2.4 2.5" stroke-width="1.4"/>`,
-      // Master: winged crest with a three-point crown
-      master: `<path d="M5 6.5 1 5l1.6 4.6L1 12.8l3 .9M19 6.5 23 5l-1.6 4.6 1.6 3.2-3 .9" stroke-width="1.3" fill="currentColor" fill-opacity=".18"/><path d="${RANK_HEX}" fill="currentColor" fill-opacity=".16"/><path d="M8.2 11 12 7.4l3.8 3.6L12 16.4Z" fill="currentColor" fill-opacity=".35"/><path d="M8.2 11h7.6" stroke-width="1"/><path d="M8.6 5.6 10 3.6l2 1.6 2-1.6 1.4 2" stroke-width="1.2"/><path d="m8.5 19 3.5-1.7 3.5 1.7"/>`,
-      // Grandmaster: double frame, big swept wings, horned crown, glowing core
-      gm: `<path d="M5.2 6.2 .6 3.8l1.8 4.8L.4 11.6l2.6 1.6-1.6 3 4 .2M18.8 6.2l4.6-2.4-1.8 4.8 2 3-2.6 1.6 1.6 3-4 .2" stroke-width="1.2" fill="currentColor" fill-opacity=".22"/><path d="${RANK_HEX}" fill="currentColor" fill-opacity=".18"/><path d="m12 4.6 5.8 3.6v7.6L12 19.4l-5.8-3.6V8.2Z" stroke-width="1" fill="currentColor" fill-opacity=".14"/><path d="M8.6 11.2 12 7.8l3.4 3.4L12 15.6Z" fill="currentColor" fill-opacity=".55"/><path d="M7.4 4.4 8.6 1.4 10.4 3.4 12 .8l1.6 2.6 1.8-2 1.2 3" stroke-width="1.2" fill="currentColor" fill-opacity=".25"/><path d="m8.6 20.4 3.4-1.4 3.4 1.4" stroke-width="1.3"/>`,
-      // Challenger: blue crest, layered wings, five-point crown, gold core gem
-      challenger: `<path d="M5.4 6 .4 3.2l1.6 5L0 11.4l2.8 1.8-1.8 3.4 4.2.4-1 2.4 3.4-1.2M18.6 6l5-2.8-1.6 5 2 3.2-2.8 1.8 1.8 3.4-4.2.4 1 2.4-3.4-1.2" stroke-width="1.15" fill="currentColor" fill-opacity=".24"/><path d="${RANK_HEX}" fill="currentColor" fill-opacity=".2"/><path d="m12 4.4 6 3.7v7.8l-6 3.7-6-3.7V8.1Z" stroke-width="1" fill="currentColor" fill-opacity=".16"/><path d="M6.8 4.6 7.6 1.4l1.8 2L11 .6l1 2 1-2 1.6 2.8 1.8-2 .8 3.2" stroke="#f3c95c" stroke-width="1.15" fill="#f3c95c" fill-opacity=".35"/><path d="M8.4 11.4 12 7.6l3.6 3.8L12 16.2Z" fill="#f3c95c" stroke="#f3c95c" stroke-width="1.2"/><path d="M8.4 11.4h7.2M12 7.6v8.6" stroke="#fff7d6" stroke-width=".7"/><circle cx="12" cy="11.6" r="1.1" fill="#fffbe8" stroke="none"/><path d="m8.4 20.6 3.6-1.5 3.6 1.5" stroke="#f3c95c" stroke-width="1.3"/>`,
+      // Master: the platform's icon untouched, plus a small wing on each side
+      master: RANK_BASE + '<path d="M3.6 8.4 1 7.6l1.2 3.2L1 13l2.6-.6M20.4 8.4l2.6-.8-1.2 3.2L23 13l-2.6-.6" stroke-width="1.3"/>',
+      // Grandmaster: bigger swept wings and a three-point crown
+      gm: RANK_BASE + '<path d="M3.6 7.8 .4 6.4l1.4 3.6L.4 13l3.2.2M20.4 7.8l3.2-1.4-1.4 3.6 1.4 3-3.2.2" stroke-width="1.3" fill="currentColor" fill-opacity=".2"/><path d="m9 4.6-.6-3 2 1.4L12 .6l1.6 2.4 2-1.4-.6 3" stroke-width="1.2"/>',
+      // Challenger: GM's wings and crown in gold, and the core filled gold
+      challenger: RANK_BASE + '<path d="M3.6 7.8 .4 6.4l1.4 3.6L.4 13l3.2.2M20.4 7.8l3.2-1.4-1.4 3.6 1.4 3-3.2.2" stroke-width="1.3" fill="currentColor" fill-opacity=".22"/><path d="m9 4.6-.6-3 2 1.4L12 .6l1.6 2.4 2-1.4-.6 3" stroke="#f3c95c" stroke-width="1.2" fill="#f3c95c" fill-opacity=".35"/><path d="m7 13 5-6 5 6-5 4Z" fill="#f3c95c" fill-opacity=".9" stroke="none"/>',
     };
     const RANK_TIERS = [
         { k: 'challenger', min: 2800, name: 'Challenger', color: '#3fb4ff' },
         { k: 'gm', min: 2600, name: 'Grandmaster', color: '#e8304a' },
         { k: 'master', min: 2400, name: 'Master', color: '#ee7fd0' },
-        { k: 'cm', min: 2200, name: 'Candidate Master', color: null },
-        { k: 'diamond', min: 2000, name: 'Diamond', color: null },
+        { k: '', min: 0, name: '', color: null }, // below Master: the platform's own icon
     ];
-    const TIER_BY_COLOR = { '#648dcb': 'diamond', '#ad7dbb': 'cm', '#e36db6': 'master', '#cf4848': 'gm' };
+    const TIER_BY_COLOR = { '#e36db6': 'master', '#cf4848': 'gm' };
     function rankIcons() {
         for (const sp of document.querySelectorAll('span[style*="--tier-color"]')) {
             const svg = [...sp.children].find(c => c.tagName === 'svg' && !c.classList.contains('cbc-rank-svg'));
