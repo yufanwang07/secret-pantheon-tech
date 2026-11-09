@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.7
+// @version      2026-11-09.8
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -2120,19 +2120,16 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     // strokes (owner, 11-09): Master small wings, Grandmaster bigger wings and a crown, and a custom Challenger tier at
     // 2800+ (blue, a second outer pair of wings, gold crown, gold core). The platform's svg stays in the DOM (React owns it), hidden; ours sits beside it.
     const RANK_BASE = '<path d="m12 2 8 5v10l-8 5-8-5V7Z" fill="currentColor" fill-opacity=".12"/><path d="m7 13 5-6 5 6-5 4Z"/><path d="m8 19 4-2 4 2"/>';
-    // wings are closed shapes that start and end on the hex's side, so no stroke ever crosses into the figure
-    const WING_L = 'M4 8.6 1.3 7.4l.7 2.5-1.1 1.4 1.6.9-.6 1.6 2.1-.3';
-    const WING_R = 'M20 8.6l2.7-1.2-.7 2.5 1.1 1.4-1.6.9.6 1.6-2.1-.3';
-    const BIG_L = 'M4 7.8.2 5.6l1.2 3.3-1.4 1.9 1.6 1.2-1 2.1 1.9.1-.4 1.9L4 15';
-    const BIG_R = 'M20 7.8l3.8-2.2-1.2 3.3 1.4 1.9-1.6 1.2 1 2.1-1.9.1.4 1.9L20 15';
-    const OUTER_L = 'M1.2 7.4-2.6 4.2l.4 3.6-1.9 1.6 1.9 1.3-1.5 2.4 2.3.1-.6 2.4 2.6-1.6';
-    const OUTER_R = 'M22.8 7.4l3.8-3.2-.4 3.6 1.9 1.6-1.9 1.3 1.5 2.4-2.3.1.6 2.4-2.6-1.6';
-    // crown above the hex's top vertex, closed, base touching the apex only
-    const CROWN = 'M9.6 1.9 9.1 -1.3l1.7 1.1L12 -2.2l1.2 2 1.7-1.1-.5 3.2Z';
+    // wings (the earlier multi-point ones) start and end exactly on the hex's outline, so nothing pokes into the figure
+    const M_L = 'M4.8 6.5 1 5l1.6 4.6L1 12.8l3 .9', M_R = 'M19.2 6.5 23 5l-1.6 4.6 1.6 3.2-3 .9';
+    const G_L = 'M5.2 6.25.6 3.8l1.8 4.8L.4 11.6l2.6 1.6-1.6 3L4 16.4', G_R = 'M18.8 6.25l4.6-2.45-1.8 4.8 2 3-2.6 1.6 1.6 3-2.6.2';
+    const C_L = 'M1.4 4.6-2.6 1.6l1 4.2-2.4 2.2 2.4 1.4-1.8 2.8 2.6.4-1 3 3.4-.8', C_R = 'M22.6 4.6l4-3-1 4.2 2.4 2.2-2.4 1.4 1.8 2.8-2.6.4 1 3-3.4-.8';
+    // the short crown: its two feet sit on the hex's top edges
+    const CROWN = 'M9.2 3.75 8.7 1.4l1.8 1.2L12 .5l1.5 2.1 1.8-1.2-.5 2.35';
     const RANK_ICONS = {
-      master: RANK_BASE + `<path d="${WING_L}M${WING_R.slice(1)}" stroke-width="1.25" fill="currentColor" fill-opacity=".3"/>`,
-      gm: RANK_BASE + `<path d="${BIG_L}M${BIG_R.slice(1)}" stroke-width="1.25" fill="currentColor" fill-opacity=".32"/><path d="${CROWN}" stroke-width="1.1" fill="currentColor" fill-opacity=".45"/>`,
-      challenger: RANK_BASE + `<path d="${OUTER_L}M${OUTER_R.slice(1)}" stroke-width="1.1" fill="currentColor" fill-opacity=".18"/><path d="${BIG_L}M${BIG_R.slice(1)}" stroke-width="1.25" fill="currentColor" fill-opacity=".34"/><path d="${CROWN}" stroke="#f3c95c" stroke-width="1.1" fill="#f3c95c" fill-opacity=".55"/><path d="m7 13 5-6 5 6-5 4Z" fill="#f3c95c" fill-opacity=".9" stroke="none"/>`,
+      master: RANK_BASE + `<path d="${M_L}M${M_R.slice(1)}" stroke-width="1.3" fill="currentColor" fill-opacity=".18"/>`,
+      gm: RANK_BASE + `<path d="${G_L}M${G_R.slice(1)}" stroke-width="1.2" fill="currentColor" fill-opacity=".22"/><path d="${CROWN}" stroke-width="1.2" fill="currentColor" fill-opacity=".25"/>`,
+      challenger: RANK_BASE + `<path d="${C_L}M${C_R.slice(1)}" stroke-width="1.1" fill="currentColor" fill-opacity=".14"/><path d="${G_L}M${G_R.slice(1)}" stroke-width="1.2" fill="currentColor" fill-opacity=".24"/><path d="${CROWN}" stroke="#f3c95c" stroke-width="1.2" fill="#f3c95c" fill-opacity=".35"/><path d="m7 13 5-6 5 6-5 4Z" fill="#f3c95c" fill-opacity=".9" stroke="none"/>`,
     };
     const RANK_TIERS = [
         { k: 'challenger', min: 2800, name: 'Challenger', color: '#3fb4ff' },
