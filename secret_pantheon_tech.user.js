@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.10
+// @version      2026-11-09.11
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -2123,9 +2123,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     // wings (the earlier multi-point ones) start and end exactly on the hex's outline, so nothing pokes into the figure
     const M_L = 'M4.8 6.5 1 5l1.6 4.6L1 12.8l3 .9', M_R = 'M19.2 6.5 23 5l-1.6 4.6 1.6 3.2-3 .9';
     const G_L = 'M5.2 6.25.6 3.8l1.8 4.8L.4 11.6l2.6 1.6-1.6 3L4 16.4', G_R = 'M18.8 6.25l4.6-2.45-1.8 4.8 2 3-2.6 1.6 1.6 3-2.6.2';
-    // feather segments, top (longest, swept up) to bottom: each a separate quad whose base sits on the hex's side
-    const CH_L = 'M4.6 6.6 L-2.08 2.64 L-1.44 4.84 L4 8.6 M4 9.4 L-1.92 6.34 L-1.12 8.54 L4 11.2 M4 12 L-1.28 10.54 L-0.48 12.54 L4 13.6 M4 14.4 L-0.16 14.54 L0.48 16.34 L4 16';
-    const CH_R = 'M19.4 6.6 L26.08 2.64 L25.44 4.84 L20 8.6 M20 9.4 L25.92 6.34 L25.12 8.54 L20 11.2 M20 12 L25.28 10.54 L24.48 12.54 L20 13.6 M20 14.4 L24.16 14.54 L23.52 16.34 L20 16';
+    // three feather segments, top (longest, swept up) to bottom: each a separate quad whose base sits on the hex's side
+    const CH_L = 'M4.6 6.6 L-2.08 2.64 L-1.28 5.24 L4 9 M4 10 L-1.76 7.74 L-0.96 10.34 L4 12.6 M4 13.6 L-1.12 12.74 L-0.32 15.14 L4 15.8';
+    const CH_R = 'M19.4 6.6 L26.08 2.64 L25.28 5.24 L20 9 M20 10 L25.76 7.74 L24.96 10.34 L20 12.6 M20 13.6 L25.12 12.74 L24.32 15.14 L20 15.8';
     const C_L = 'M1.4 4.6-2.6 1.6l1 4.2-2.4 2.2 2.4 1.4-1.8 2.8 2.6.4-1 3 3.4-.8', C_R = 'M22.6 4.6l4-3-1 4.2 2.4 2.2-2.4 1.4 1.8 2.8-2.6.4 1 3-3.4-.8';
     // the short crown: its two feet sit on the hex's top edges
     const CROWN = 'M9.2 3.75 8.7 1.4l1.8 1.2L12 .5l1.5 2.1 1.8-1.2-.5 2.35';
@@ -2142,25 +2142,56 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         { k: '', min: 0, name: '', color: null }, // below Master: the platform's own icon
     ];
     const TIER_BY_COLOR = { '#e36db6': 'master', '#cf4848': 'gm' };
+    // the tier popover (hovering a row's tier icon) is drawn from the platform's tiers: remember which row's icon was
+    // hovered so the popover can show Challenger for it
+    let lastTierRating = null;
+    for (const ev of ['pointerover', 'focusin', 'click'])
+        document.addEventListener(ev, e => {
+            const b = e.target.closest?.('button[aria-label$="rating tier"]');
+            if (!b) return;
+            const txt = (b.closest('tr')?.querySelector('td[data-rating]') || b.parentElement)?.textContent || '';
+            const m = txt.replace(/[, \s]/g, '').match(/(\d{3,4})/);
+            lastTierRating = m ? +m[1] : null;
+        }, true);
+    // the "About ladder ratings" panel lists the platform's tiers: add Challenger after Grandmaster
+    function tierPanel() {
+        for (const dl of document.querySelectorAll('dl.tier-brackets:not([data-cbc])')) {
+            const gm = [...dl.children].find(d => d.querySelector('span[title^="Grandmaster"]'));
+            if (!gm) continue;
+            dl.dataset.cbc = '1';
+            const ch = gm.cloneNode(true);
+            const sp = ch.querySelector('span[title^="Grandmaster"]');
+            sp.title = 'Challenger: 2,800+ Elo'; sp.dataset.cbcForce = 'challenger';
+            delete sp.dataset.cbcRank; delete sp.dataset.cbcBase; ch.querySelector('.cbc-rank-svg')?.remove();
+            const psvg = sp.querySelector('svg'); if (psvg) psvg.style.display = '';
+            const name = [...sp.children].find(c => c.tagName === 'SPAN'); if (name) name.textContent = 'Challenger';
+            const dd = ch.querySelector('dd'); if (dd) dd.textContent = '2,800+';
+            gm.after(ch);
+        }
+    }
     function rankIcons() {
+        tierPanel();
         for (const sp of document.querySelectorAll('span[style*="--tier-color"]')) {
             const svg = [...sp.children].find(c => c.tagName === 'svg' && !c.classList.contains('cbc-rank-svg'));
             if (!svg || svg.querySelector('circle[stroke-dasharray]')) continue; // provisional: leave as is
             const base = (sp.dataset.cbcBase ||= sp.style.getPropertyValue('--tier-color').trim().toLowerCase());
             let rating = null;
+            const pop = sp.closest('.tier-description');
+            if (pop && lastTierRating != null) rating = lastTierRating; // the hovered row's tier popover
             const row = sp.closest('tr');
             const txt = (row?.querySelector('td[data-rating]') || sp.parentElement)?.textContent || '';
-            const m = txt.replace(/[, \s]/g, '').match(/(\d{3,4})/);
-            if (m) rating = +m[1];
+            const m = pop || sp.closest('.tier-brackets') ? null : txt.replace(/[, \s]/g, '').match(/(\d{3,4})/);
+            if (m && rating == null) rating = +m[1];
             let tier = rating != null ? RANK_TIERS.find(t => rating >= t.min) : null;
             if (rating == null && TIER_BY_COLOR[base]) tier = RANK_TIERS.find(t => t.k === TIER_BY_COLOR[base]);
             if (tier && tier.k === 'challenger' && base !== '#cf4848') tier = RANK_TIERS[1]; // only real GMs can be Challenger
+            if (sp.dataset.cbcForce) tier = RANK_TIERS.find(t => t.k === sp.dataset.cbcForce);
             const k = tier?.k || '';
             if (sp.dataset.cbcRank === k && (!k || sp.querySelector('.cbc-rank-svg'))) continue;
             sp.dataset.cbcRank = k;
             sp.querySelector('.cbc-rank-svg')?.remove();
             sp.classList.remove('cbc-rank', 'cbc-rank-gm', 'cbc-rank-challenger', 'cbc-rank-master');
-            if (!k) { svg.style.display = ''; continue; }
+            if (!k) { svg.style.display = ''; sp.style.setProperty('--tier-color', base); continue; }
             const mine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
             for (const [a, v] of [['viewBox', '0 0 24 24'], ['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', '1.6'], ['stroke-linejoin', 'round'], ['stroke-linecap', 'round'], ['aria-hidden', 'true']]) mine.setAttribute(a, v);
             mine.classList.add('cbc-rank-svg');
@@ -2170,9 +2201,16 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             sp.classList.add('cbc-rank', 'cbc-rank-' + k);
             if (tier.color) sp.style.setProperty('--tier-color', tier.color);
             const label = [...sp.children].find(c => c.tagName === 'SPAN');
+            const range = pop ? [...pop.children].find(c => c !== sp && c.tagName === 'SPAN') : null; // "2,600+ Elo"
             if (k === 'challenger') {
                 if (label && label.textContent !== 'Challenger') label.textContent = 'Challenger';
                 if (sp.title) sp.title = 'Challenger: 2,800+ Elo';
+                if (range) range.textContent = '2,800+ Elo';
+                const btn = row?.querySelector('button[aria-label$="rating tier"]'); if (btn) btn.setAttribute('aria-label', 'Challenger rating tier');
+            } else if (k === 'gm') { // Grandmaster now ends where Challenger starts
+                if (label && label.textContent === 'Challenger') label.textContent = 'Grandmaster'; // React reuses the popover's nodes
+                if (/^Grandmaster/.test(sp.title)) sp.title = 'Grandmaster: 2,600–2,799 Elo';
+                if (range) range.textContent = '2,600–2,799 Elo';
             }
         }
     }
