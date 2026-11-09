@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.1
+// @version      2026-11-09.2
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -429,22 +429,19 @@ td[data-challenge] > a:hover { background: color-mix(in srgb, currentColor 10%, 
 .cbc-vsus { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 36px; font: 600 11px/1 var(--cbc-mono);
   text-align: right; font-variant-numeric: tabular-nums; }
 .cbc-vsus.none { color: var(--cbc-muted); font-weight: 400; opacity: .45; font-size: 10px; }
-/* qualified teams: gold Q badge + gold edge on their ladder row, and the "Qualified" filter panel */
-.cbc-qbadge { display: inline-flex; align-items: center; height: 15px; padding: 0 5px; margin-right: 5px; box-sizing: border-box; vertical-align: middle;
-  font: 700 9.5px/1 var(--cbc-mono); letter-spacing: .04em; color: #2a1f05; background: linear-gradient(180deg, #f8e7ba, #d9b453); border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(184,147,63,.55), 0 0 6px rgba(228,200,126,.35); white-space: nowrap; }
-tr.cbc-qrow > td:first-child { box-shadow: inset 3px 0 0 #d9b453; }
-tr.cbc-qrow { background-image: linear-gradient(90deg, rgba(228,200,126,.10), transparent 45%); }
+/* qualified teams: golden eligibility icon + gold edge and tint on their ladder row (stacks with our own row's edge) */
+body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qicon { color: #e9c96b !important; filter: drop-shadow(0 0 3px rgba(233,201,107,.65)); }
+body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qicon svg { color: #e9c96b !important; stroke: currentColor; }
+body:not(.cbc-noqhl) tr.cbc-qrow > td:first-child { box-shadow: inset 3px 0 0 #d9b453 !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow[data-you="true"] > td:first-child { box-shadow: inset 3px 0 0 #d7d7d9, inset 6px 0 0 #d9b453 !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow > td { background-image: linear-gradient(rgba(228,200,126,.065), rgba(228,200,126,.065)) !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow > td:nth-child(-n+3) { background-image: linear-gradient(90deg, rgba(228,200,126,.12), rgba(228,200,126,.065)) !important; }
 .cbc-qual-label { cursor: pointer; }
-body.cbc-qonly table:has(tr[data-ladder-team]) { display: none !important; }
-body:not(.cbc-qonly) #cbc-qual-panel { display: none; }
-#cbc-qual-panel { margin: 0 0 12px; }
-.cbc-qual-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.cbc-qual-table th { text-align: left; font: 500 10px/1 var(--cbc-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--cbc-muted); padding: 6px 10px; border-bottom: 1px solid var(--cbc-line); }
-.cbc-qual-table td { padding: 7px 10px; border-bottom: 1px solid var(--cbc-line); }
-.cbc-qual-table .r { text-align: right; } .cbc-qual-table .mono { font-family: var(--cbc-mono); }
-.cbc-qual-table a { color: inherit; text-decoration: none; font-weight: 600; } .cbc-qual-table a:hover { text-decoration: underline; }
-#cbc-qual-panel .cbc-sub { margin-top: 8px; }
+body.cbc-qonly tr[data-ladder-team]:not(.cbc-qrow) { display: none !important; }
+body.cbc-qonly tr.cbc-qrow td[data-rank] > span:not(.cbc-qrank):not(.cbc-vsus) { display: none !important; }
+td[data-rank] span > small, .cbc-qrank small { font-size: 9.5px; color: var(--cbc-muted); opacity: .75; margin-left: 2px; }
+#cbc-qhl-toggle { position: absolute; top: 0; right: 0; font-size: 11px; }
+#cbc-qhl-toggle.on { border-color: rgba(217,180,83,.7); color: #e9c96b; }
 table:has(tr[data-ladder-team]) tr > :first-child { position: relative; white-space: nowrap; width: 84px; min-width: 84px; box-sizing: border-box;
   padding-right: 50px !important; font-variant-numeric: tabular-nums; }
 table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 400; font-size: 10px; opacity: .7; }
@@ -1946,6 +1943,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         if (d) hue = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
         hue = Math.round(hue * 60 + 360) % 360;
         if (sat < .08) return dark ? 'hsl(0 0% 88%)' : 'hsl(0 0% 22%)'; // grey tiers stay neutral
+        // Grandmaster (#cf4848): a deeper, more vivid red; Master (#e36db6): a bit brighter pink (owner, 11-09)
+        if (/^#?cf4848$/i.test(hex.trim())) return dark ? 'hsl(354 92% 60%)' : 'hsl(354 88% 40%)';
+        if (/^#?e36db6$/i.test(hex.trim())) return dark ? 'hsl(323 96% 78%)' : 'hsl(323 90% 45%)';
         return dark ? `hsl(${hue} ${Math.max(78, sat * 100).toFixed(0)}% 70%)` : `hsl(${hue} 95% 38%)`;
     }
     // ---------------------------------------------------------------- quick unranked
@@ -2055,49 +2055,46 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     }
     const ordinal = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th');
     let qualData = null;
-    // "Qualified" ladder filter: the platform's own radios are React-controlled, so ours lives beside them under its own
-    // name and swaps the ladder table for a panel of the qualified teams (any ladder page, rated from the full ladder).
-    function qualFilter(table) {
+    // "Qualified" ladder filter. The platform's radios are React-controlled and its category filter is server-side, so
+    // ours lives beside them under its own name: picking it switches the platform to All (every team, rating order) and
+    // hides everything but the qualified rows; their rank cell shows the position among the qualified, overall small.
+    const qOnly = () => document.body.classList.contains('cbc-qonly');
+    function qualFilter() {
         const fs = [...document.querySelectorAll('fieldset')].find(f => f.querySelector('input[name="ladder-category"]'));
         if (!fs) return;
-        if (!fs.querySelector('#cbc-qual-radio')) {
-            const r = h('input', { type: 'radio', id: 'cbc-qual-radio', name: 'cbc-ladder-qual' });
-            r.checked = document.body.classList.contains('cbc-qonly');
-            r.addEventListener('change', () => { if (r.checked) { document.body.classList.add('cbc-qonly'); fs.querySelectorAll('input[name="ladder-category"]').forEach(x => x.checked = false); qualPanel(table); } });
-            fs.querySelectorAll('input[name="ladder-category"]').forEach(x => x.addEventListener('click', () => { r.checked = false; document.body.classList.remove('cbc-qonly'); }));
+        const cats = () => [...fs.querySelectorAll('input[name="ladder-category"]')];
+        let r = fs.querySelector('#cbc-qual-radio');
+        if (!r) {
+            r = h('input', { type: 'radio', id: 'cbc-qual-radio', name: 'cbc-ladder-qual' });
+            r.addEventListener('change', () => {
+                if (!r.checked) return;
+                document.body.classList.add('cbc-qonly');
+                const all = cats().find(x => x.parentElement?.textContent.trim() === 'All');
+                if (all && !all.checked) all.click(); // the platform reloads every category
+                setTimeout(() => polishLadder(true), 0);
+            });
+            fs.addEventListener('click', e => {
+                const x = e.target.closest('label')?.querySelector('input[name="ladder-category"]');
+                if (x && e.isTrusted) { r.checked = false; document.body.classList.remove('cbc-qonly'); polishLadder(true); }
+            });
             fs.append(h('label', { class: 'cbc-qual-label', title: 'Teams qualified for the finals: top 8 of each finished qualifier' }, r, 'Qualified'));
         }
-        if (document.body.classList.contains('cbc-qonly')) qualPanel(table);
+        r.checked = qOnly();
+        if (qOnly()) cats().forEach(x => { if (x.checked) x.checked = false; });
     }
-    async function qualPanel(table) {
-        const host = table?.parentElement;
-        if (!host) return;
-        let panel = document.getElementById('cbc-qual-panel');
-        if (!panel) { panel = h('div', { id: 'cbc-qual-panel' }, h('div', { class: 'cbc-empty' }, 'Loading qualified teams…')); host.parentElement.insertBefore(panel, host); }
-        if (panel.dataset.done) return;
-        panel.dataset.done = '1';
-        try {
-            const Q = await qualified();
-            const draw = rows => {
-                const live = new Map((rows || []).map(r => [r.id, r]));
-                const list = [...Q.map.values()].map(t => ({ ...t, l: live.get(t.id) }))
-                    .sort((a, b) => (a.l?.rank ?? 1e9) - (b.l?.rank ?? 1e9) || a.place - b.place);
-                const pend = Q.quals.filter(q => !q.done).map(q => q.name);
-                if (!Q.quals.some(q => q.tag === 'UK')) pend.push('UK Qualifiers');
-                panel.replaceChildren(
-                    h('table', { class: 'cbc-qual-table' },
-                        h('thead', {}, h('tr', {}, h('th', {}, 'Rank'), h('th', {}, 'Team'), h('th', {}, 'Qualified'), h('th', { class: 'r' }, 'Rating'))),
-                        h('tbody', {}, ...list.map(t => h('tr', { class: 'cbc-qrow' },
-                            h('td', { class: 'mono' }, t.l?.rank ?? (rows ? '–' : '…')),
-                            h('td', {}, h('a', { href: `/game/team/${t.id}` }, t.l?.name ?? t.name)),
-                            h('td', {}, h('span', { class: 'cbc-qbadge' }, `${t.tag} ${ordinal(t.place)}`)),
-                            h('td', { class: 'r mono' }, t.l ? Math.round(t.l.rating).toLocaleString() : (rows ? '–' : '…')))))),
-                    h('div', { class: 'cbc-sub' }, `${list.length} qualified · top ${QUAL_TOP} of ${Q.quals.filter(q => q.done).map(q => q.name).join(', ') || 'no finished qualifier yet'}`
-                        + (pend.length ? ` · not run yet: ${pend.join(', ')} (their top ${QUAL_TOP} join once results are out)` : '')));
-            };
-            draw(null);
-            draw(await predLadder());
-        } catch (e) { panel.dataset.done = ''; panel.replaceChildren(h('div', { class: 'cbc-empty' }, 'Could not load qualified teams (' + e.message + ')')); }
+    // the switch for the gold highlights, top right of the ladder's header
+    function qualToggle() {
+        if (document.getElementById('cbc-qhl-toggle')) return;
+        const title = [...document.querySelectorAll('h1')].find(e => e.textContent.trim() === 'Ladder');
+        const head = title?.parentElement?.parentElement;
+        if (!head) return;
+        const b = h('button', { type: 'button', id: 'cbc-qhl-toggle', class: 'cbc-toggle', title: 'Gold highlight on the teams qualified for the finals' });
+        const sync = () => { b.textContent = 'qualifier highlights ' + (settings.qualHl === false ? 'off' : 'on'); b.classList.toggle('on', settings.qualHl !== false);
+            document.body.classList.toggle('cbc-noqhl', settings.qualHl === false); };
+        b.addEventListener('click', () => { settings.qualHl = settings.qualHl === false; save(); sync(); });
+        sync();
+        head.style.position ||= 'relative';
+        head.append(b);
     }
 
     let ladderStatsHooked = false;
@@ -2105,10 +2102,11 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         const dark = document.documentElement.dataset.theme === 'dark';
         const table = document.querySelector('tr[data-ladder-team]')?.closest('table');
         if (table) {
-            qualFilter(table);
+            qualFilter(); qualToggle();
             if (!qualData && !polishLadder.qLoading) { polishLadder.qLoading = true; qualified().then(Q => { qualData = Q; polishLadder(true); }).catch(() => { polishLadder.qLoading = false; }); }
             const ths = [...table.querySelectorAll('thead th')];
             const si = ths.findIndex(th => th.textContent.trim() === 'Season');
+            for (const th of ths) if (th.textContent.trim() === 'Language') th.textContent = 'Lang.';
             if (si >= 0 && !document.getElementById('cbc-ladder-cols')) {
                 const st = document.createElement('style');
                 st.id = 'cbc-ladder-cols';
@@ -2164,10 +2162,13 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             }
             const q = qualData && oppId ? qualData.map.get(oppId) : null;
             tr.classList.toggle('cbc-qrow', !!q);
-            const badges = tr.querySelector('.team-badges') || a?.parentElement;
-            let qb = tr.querySelector('.cbc-qbadge');
-            if (q && badges && !qb) { qb = h('span', { class: 'cbc-qbadge', title: `Qualified for the finals: ${ordinal(q.place)} in ${q.from}` }, 'Q'); badges.prepend(qb); }
-            else if (!q && qb) qb.remove();
+            const elig = tr.querySelector('.team-badges > span[title*=" team"], .team-badges > span[title*="non-student"]');
+            if (elig) { elig.classList.toggle('cbc-qicon', !!q); if (q) elig.dataset.cbcQ = `Qualified for the finals: ${ordinal(q.place)} in ${q.from}`; }
+            if (elig && q && !elig.dataset.cbcTitle) { elig.dataset.cbcTitle = elig.getAttribute('title') || ''; }
+            if (elig && elig.dataset.cbcTitle != null) elig.setAttribute('title', q ? `${elig.dataset.cbcQ}\n${elig.dataset.cbcTitle}` : elig.dataset.cbcTitle);
+            // rank cell: the parenthesised overall position (category views) becomes a small grey number
+            const sm = rankTd?.querySelector('span > small');
+            if (sm && /[()]/.test(sm.textContent)) sm.textContent = sm.textContent.replace(/[()]/g, '');
             const t = tr.querySelector('[style*="--tier-color"]')?.style.getPropertyValue('--tier-color');
             if (!t || !a) continue;
             const key = t + (dark ? 'd' : 'l');
@@ -2175,6 +2176,23 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             a.dataset.cbcTier = key;
             const ink = tierInk(t, dark);
             if (ink) a.style.color = ink;
+        }
+        qualRanks();
+    }
+    // in the Qualified view: position among the qualified (rating order, as the table is) + overall rank, small and grey
+    function qualRanks() {
+        let i = 0;
+        for (const tr of document.querySelectorAll('tr[data-ladder-team]')) {
+            const td = tr.querySelector('td[data-rank]');
+            if (!td) continue;
+            let qr = td.querySelector('.cbc-qrank');
+            if (!qOnly() || !tr.classList.contains('cbc-qrow')) { qr?.remove(); continue; }
+            const overall = (td.querySelector('span[aria-label]')?.getAttribute('aria-label') || '').match(/(?:overall|Overall position) (\d+)/)?.[1]
+                ?? td.querySelector('span')?.firstChild?.textContent.trim();
+            i++;
+            if (!qr) { qr = h('span', { class: 'cbc-qrank' }); td.prepend(qr); }
+            const k = i + '/' + overall;
+            if (qr.dataset.k !== k) { qr.dataset.k = k; qr.replaceChildren(String(i), ' ', h('small', {}, overall || '')); }
         }
     }
 
