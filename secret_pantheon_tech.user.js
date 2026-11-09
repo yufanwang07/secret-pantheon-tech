@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.3
+// @version      2026-11-09.4
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -429,6 +429,12 @@ td[data-challenge] > a:hover { background: color-mix(in srgb, currentColor 10%, 
 .cbc-vsus { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 36px; font: 600 11px/1 var(--cbc-mono);
   text-align: right; font-variant-numeric: tabular-nums; }
 .cbc-vsus.none { color: var(--cbc-muted); font-weight: 400; opacity: .45; font-size: 10px; }
+/* rank icons: ours replace the platform's from Diamond up; wings/crowns draw outside the 24px box */
+.cbc-rank-svg { overflow: visible; width: 1.3rem; height: 1.3rem; color: var(--tier-color); }
+span[data-icon-only] .cbc-rank-svg { width: 1.35rem; height: 1.35rem; }
+.cbc-rank-gm .cbc-rank-svg { filter: drop-shadow(0 0 2.5px rgba(232,48,74,.6)); }
+.cbc-rank-challenger .cbc-rank-svg { filter: drop-shadow(0 0 3px rgba(63,180,255,.7)) drop-shadow(0 0 1.5px rgba(243,201,92,.5)); animation: cbc-chall 3.2s ease-in-out infinite; }
+@keyframes cbc-chall { 50% { filter: drop-shadow(0 0 5px rgba(63,180,255,.9)) drop-shadow(0 0 2.5px rgba(243,201,92,.7)); } }
 /* qualified teams: golden eligibility icon and rank, gold tint fading out across the row. Our own row: its cells go
    transparent so the tint shows, and the platform's light "you" fill is laid on top of the tint instead */
 body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qicon { color: #e9c96b !important; filter: drop-shadow(0 0 3px rgba(233,201,107,.65)); }
@@ -1946,8 +1952,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         hue = Math.round(hue * 60 + 360) % 360;
         if (sat < .08) return dark ? 'hsl(0 0% 88%)' : 'hsl(0 0% 22%)'; // grey tiers stay neutral
         // Grandmaster (#cf4848): a deeper, more vivid red; Master (#e36db6): a bit brighter pink (owner, 11-09)
-        if (/^#?cf4848$/i.test(hex.trim())) return dark ? 'hsl(354 92% 60%)' : 'hsl(354 88% 40%)';
-        if (/^#?e36db6$/i.test(hex.trim())) return dark ? 'hsl(323 96% 78%)' : 'hsl(323 90% 45%)';
+        if (/^#?(cf4848|e8304a)$/i.test(hex.trim())) return dark ? 'hsl(354 92% 60%)' : 'hsl(354 88% 40%)';
+        if (/^#?(e36db6|ee7fd0)$/i.test(hex.trim())) return dark ? 'hsl(323 96% 78%)' : 'hsl(323 90% 45%)';
+        if (/^#?3fb4ff$/i.test(hex.trim())) return dark ? 'hsl(203 100% 68%)' : 'hsl(203 95% 38%)'; // Challenger
         return dark ? `hsl(${hue} ${Math.max(78, sat * 100).toFixed(0)}% 70%)` : `hsl(${hue} 95% 38%)`;
     }
     // ---------------------------------------------------------------- quick unranked
@@ -2099,6 +2106,68 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         head.append(b);
     }
 
+    // ---------------------------------------------------------------- rank icons
+    // The platform draws every tier from Platinum up with the same hex. Ours get more elaborate going up (owner, 11-09):
+    // Diamond a faceted gem, Candidate Master side blades, Master wings and a crown, Grandmaster a double frame and
+    // swept wings, and a custom Challenger tier at 2800+ (blue, gold crown and gold core). The platform's svg stays in the
+    // DOM (React owns it), hidden; ours sits beside it.
+    const RANK_HEX = 'm12 2 8 5v10l-8 5-8-5V7Z';
+    const RANK_ICONS = {
+      // platform's (for reference): Platinum
+      platinum: `<path d="${RANK_HEX}" fill="currentColor" fill-opacity=".12"/><path d="m7 13 5-6 5 6-5 4Z"/><path d="m8 19 4-2 4 2"/>`,
+      // Diamond: faceted gem, double chevron
+      diamond: `<path d="${RANK_HEX}" fill="currentColor" fill-opacity=".12"/><path d="M8.2 10.2 12 5.8l3.8 4.4L12 16.6Z" fill="currentColor" fill-opacity=".28"/><path d="M8.2 10.2h7.6M12 5.8v10.8" stroke-width="1"/><path d="m8.5 18.6 3.5-1.6 3.5 1.6"/>`,
+      // Candidate Master: diamond + side blades
+      cm: `<path d="${RANK_HEX}" fill="currentColor" fill-opacity=".14"/><path d="M8.2 10.2 12 5.8l3.8 4.4L12 16.6Z" fill="currentColor" fill-opacity=".3"/><path d="M8.2 10.2h7.6M12 5.8v10.8" stroke-width="1"/><path d="m8.5 18.6 3.5-1.6 3.5 1.6"/><path d="M4 9.5 1.6 12 4 14.5M20 9.5l2.4 2.5-2.4 2.5" stroke-width="1.4"/>`,
+      // Master: winged crest with a three-point crown
+      master: `<path d="M5 6.5 1 5l1.6 4.6L1 12.8l3 .9M19 6.5 23 5l-1.6 4.6 1.6 3.2-3 .9" stroke-width="1.3" fill="currentColor" fill-opacity=".18"/><path d="${RANK_HEX}" fill="currentColor" fill-opacity=".16"/><path d="M8.2 11 12 7.4l3.8 3.6L12 16.4Z" fill="currentColor" fill-opacity=".35"/><path d="M8.2 11h7.6" stroke-width="1"/><path d="M8.6 5.6 10 3.6l2 1.6 2-1.6 1.4 2" stroke-width="1.2"/><path d="m8.5 19 3.5-1.7 3.5 1.7"/>`,
+      // Grandmaster: double frame, big swept wings, horned crown, glowing core
+      gm: `<path d="M5.2 6.2 .6 3.8l1.8 4.8L.4 11.6l2.6 1.6-1.6 3 4 .2M18.8 6.2l4.6-2.4-1.8 4.8 2 3-2.6 1.6 1.6 3-4 .2" stroke-width="1.2" fill="currentColor" fill-opacity=".22"/><path d="${RANK_HEX}" fill="currentColor" fill-opacity=".18"/><path d="m12 4.6 5.8 3.6v7.6L12 19.4l-5.8-3.6V8.2Z" stroke-width="1" fill="currentColor" fill-opacity=".14"/><path d="M8.6 11.2 12 7.8l3.4 3.4L12 15.6Z" fill="currentColor" fill-opacity=".55"/><path d="M7.4 4.4 8.6 1.4 10.4 3.4 12 .8l1.6 2.6 1.8-2 1.2 3" stroke-width="1.2" fill="currentColor" fill-opacity=".25"/><path d="m8.6 20.4 3.4-1.4 3.4 1.4" stroke-width="1.3"/>`,
+      // Challenger: blue crest, layered wings, five-point crown, gold core gem
+      challenger: `<path d="M5.4 6 .4 3.2l1.6 5L0 11.4l2.8 1.8-1.8 3.4 4.2.4-1 2.4 3.4-1.2M18.6 6l5-2.8-1.6 5 2 3.2-2.8 1.8 1.8 3.4-4.2.4 1 2.4-3.4-1.2" stroke-width="1.15" fill="currentColor" fill-opacity=".24"/><path d="${RANK_HEX}" fill="currentColor" fill-opacity=".2"/><path d="m12 4.4 6 3.7v7.8l-6 3.7-6-3.7V8.1Z" stroke-width="1" fill="currentColor" fill-opacity=".16"/><path d="M6.8 4.6 7.6 1.4l1.8 2L11 .6l1 2 1-2 1.6 2.8 1.8-2 .8 3.2" stroke="#f3c95c" stroke-width="1.15" fill="#f3c95c" fill-opacity=".35"/><path d="M8.4 11.4 12 7.6l3.6 3.8L12 16.2Z" fill="#f3c95c" stroke="#f3c95c" stroke-width="1.2"/><path d="M8.4 11.4h7.2M12 7.6v8.6" stroke="#fff7d6" stroke-width=".7"/><circle cx="12" cy="11.6" r="1.1" fill="#fffbe8" stroke="none"/><path d="m8.4 20.6 3.6-1.5 3.6 1.5" stroke="#f3c95c" stroke-width="1.3"/>`,
+    };
+    const RANK_TIERS = [
+        { k: 'challenger', min: 2800, name: 'Challenger', color: '#3fb4ff' },
+        { k: 'gm', min: 2600, name: 'Grandmaster', color: '#e8304a' },
+        { k: 'master', min: 2400, name: 'Master', color: '#ee7fd0' },
+        { k: 'cm', min: 2200, name: 'Candidate Master', color: null },
+        { k: 'diamond', min: 2000, name: 'Diamond', color: null },
+    ];
+    const TIER_BY_COLOR = { '#648dcb': 'diamond', '#ad7dbb': 'cm', '#e36db6': 'master', '#cf4848': 'gm' };
+    function rankIcons() {
+        for (const sp of document.querySelectorAll('span[style*="--tier-color"]')) {
+            const svg = [...sp.children].find(c => c.tagName === 'svg' && !c.classList.contains('cbc-rank-svg'));
+            if (!svg || svg.querySelector('circle[stroke-dasharray]')) continue; // provisional: leave as is
+            const base = (sp.dataset.cbcBase ||= sp.style.getPropertyValue('--tier-color').trim().toLowerCase());
+            let rating = null;
+            const row = sp.closest('tr');
+            const txt = (row?.querySelector('td[data-rating]') || sp.parentElement)?.textContent || '';
+            const m = txt.replace(/[, \s]/g, '').match(/(\d{3,4})/);
+            if (m) rating = +m[1];
+            let tier = rating != null ? RANK_TIERS.find(t => rating >= t.min) : null;
+            if (rating == null && TIER_BY_COLOR[base]) tier = RANK_TIERS.find(t => t.k === TIER_BY_COLOR[base]);
+            if (tier && tier.k === 'challenger' && base !== '#cf4848') tier = RANK_TIERS[1]; // only real GMs can be Challenger
+            const k = tier?.k || '';
+            if (sp.dataset.cbcRank === k && (!k || sp.querySelector('.cbc-rank-svg'))) continue;
+            sp.dataset.cbcRank = k;
+            sp.querySelector('.cbc-rank-svg')?.remove();
+            sp.classList.remove('cbc-rank', 'cbc-rank-gm', 'cbc-rank-challenger', 'cbc-rank-master');
+            if (!k) { svg.style.display = ''; continue; }
+            const mine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            for (const [a, v] of [['viewBox', '0 0 24 24'], ['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', '1.6'], ['stroke-linejoin', 'round'], ['stroke-linecap', 'round'], ['aria-hidden', 'true']]) mine.setAttribute(a, v);
+            mine.classList.add('cbc-rank-svg');
+            mine.innerHTML = RANK_ICONS[k];
+            svg.style.display = 'none';
+            svg.after(mine);
+            sp.classList.add('cbc-rank', 'cbc-rank-' + k);
+            if (tier.color) sp.style.setProperty('--tier-color', tier.color);
+            const label = [...sp.children].find(c => c.tagName === 'SPAN');
+            if (k === 'challenger') {
+                if (label && label.textContent !== 'Challenger') label.textContent = 'Challenger';
+                if (sp.title) sp.title = 'Challenger: 2,800+ Elo';
+            }
+        }
+    }
     let ladderStatsHooked = false;
     function polishLadder(force) {
         const dark = document.documentElement.dataset.theme === 'dark';
@@ -2123,6 +2192,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             }
         }
         const byOpp = (force || !polishLadder.map || polishLadder.n !== stats.recs.length) ? (polishLadder.n = stats.recs.length, polishLadder.map = groupBy(stats.recs, r => [r.opp])) : polishLadder.map;
+        rankIcons();
         for (const tr of document.querySelectorAll('tr[data-ladder-team]')) {
             const urTd = tr.querySelector('td[data-challenge]');
             const urA = urTd?.querySelector('a[href*="challenge="]');
@@ -2229,6 +2299,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         try {
             injectStyle();
             retint();
+            rankIcons();
             const p = location.pathname;
             if (/^\/game\/ladder/.test(p)) polishLadder();
             const group = p.match(/^\/game\/match-groups\/([0-9a-f-]{36})/i);
