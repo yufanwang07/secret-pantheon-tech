@@ -78,7 +78,7 @@ Installs from the link above update themselves (Tampermonkey checks about once a
 - Denser rows, team names in their tier's colour, and a **vs** column with your recent head-to-head against each team.
 - **Qualified** filter next to All / Students / Intl / UK: only the teams qualified for the finals (top 8 of each finished qualifier, read from its bracket and cached), in rating order, numbered among themselves with the overall rank small beside it. In the normal views their eligibility icon and rank turn gold and their row gets a gold tint; *qualifier highlights* (top right) turns that off.
 - Category views show the overall rank as a small grey number instead of in parentheses; GM and Master team names are a deeper red and a brighter pink.
-- **Rank icons** from Master up build on the platform's own: Master adds wings, Grandmaster swept wings and a crown, and a custom **Challenger** tier at 2,800+ is blue with a gold crown and core. Team names in every match history take their rank colour too.
+- **Rank icons** from Master up build on the platform's own: Master adds wings, Grandmaster bigger wings and a crown, and a custom **Challenger** tier at 2,800+ is blue with a second outer pair of wings, a gold crown and a gold core. Team names in every match history take their rank colour too.
 
 **Tournament predictor** (a new *Predictor* entry in the sidebar)
 - Fields for sprints, UK, International and finals; sprints are single elimination, qualifiers and finals double elimination (no reset).

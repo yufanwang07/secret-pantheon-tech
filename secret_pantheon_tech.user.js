@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.5
+// @version      2026-11-09.6
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -2114,16 +2114,22 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
 
     // ---------------------------------------------------------------- rank icons
     // The platform draws every tier from Platinum up with the same hex. From Master up ours add to it, never changing its
-    // strokes (owner, 11-09): Master small wings, Grandmaster swept wings and a crown, and a custom Challenger tier at
-    // 2800+ (blue, gold crown, gold core). The platform's svg stays in the DOM (React owns it), hidden; ours sits beside it.
+    // strokes (owner, 11-09): Master small wings, Grandmaster bigger wings and a crown, and a custom Challenger tier at
+    // 2800+ (blue, a second outer pair of wings, gold crown, gold core). The platform's svg stays in the DOM (React owns it), hidden; ours sits beside it.
     const RANK_BASE = '<path d="m12 2 8 5v10l-8 5-8-5V7Z" fill="currentColor" fill-opacity=".12"/><path d="m7 13 5-6 5 6-5 4Z"/><path d="m8 19 4-2 4 2"/>';
+    // wings are closed shapes that start and end on the hex's side, so no stroke ever crosses into the figure
+    const WING_L = 'M4 8.6 1.3 7.4l.7 2.5-1.1 1.4 1.6.9-.6 1.6 2.1-.3';
+    const WING_R = 'M20 8.6l2.7-1.2-.7 2.5 1.1 1.4-1.6.9.6 1.6-2.1-.3';
+    const BIG_L = 'M4 7.8.2 5.6l1.2 3.3-1.4 1.9 1.6 1.2-1 2.1 1.9.1-.4 1.9L4 15';
+    const BIG_R = 'M20 7.8l3.8-2.2-1.2 3.3 1.4 1.9-1.6 1.2 1 2.1-1.9.1.4 1.9L20 15';
+    const OUTER_L = 'M1.2 7.4-2.6 4.2l.4 3.6-1.9 1.6 1.9 1.3-1.5 2.4 2.3.1-.6 2.4 2.6-1.6';
+    const OUTER_R = 'M22.8 7.4l3.8-3.2-.4 3.6 1.9 1.6-1.9 1.3 1.5 2.4-2.3.1.6 2.4-2.6-1.6';
+    // crown above the hex's top vertex, closed, base touching the apex only
+    const CROWN = 'M9.6 1.9 9.1 -1.3l1.7 1.1L12 -2.2l1.2 2 1.7-1.1-.5 3.2Z';
     const RANK_ICONS = {
-      // Master: the platform's icon untouched, plus a small wing on each side
-      master: RANK_BASE + '<path d="M3.6 8.4 1 7.6l1.2 3.2L1 13l2.6-.6M20.4 8.4l2.6-.8-1.2 3.2L23 13l-2.6-.6" stroke-width="1.3"/>',
-      // Grandmaster: bigger swept wings and a three-point crown
-      gm: RANK_BASE + '<path d="M3.6 7.8 .4 6.4l1.4 3.6L.4 13l3.2.2M20.4 7.8l3.2-1.4-1.4 3.6 1.4 3-3.2.2" stroke-width="1.3" fill="currentColor" fill-opacity=".2"/><path d="m9 4.6-.6-3 2 1.4L12 .6l1.6 2.4 2-1.4-.6 3" stroke-width="1.2"/>',
-      // Challenger: GM's wings and crown in gold, and the core filled gold
-      challenger: RANK_BASE + '<path d="M3.6 7.8 .4 6.4l1.4 3.6L.4 13l3.2.2M20.4 7.8l3.2-1.4-1.4 3.6 1.4 3-3.2.2" stroke-width="1.3" fill="currentColor" fill-opacity=".22"/><path d="m9 4.6-.6-3 2 1.4L12 .6l1.6 2.4 2-1.4-.6 3" stroke="#f3c95c" stroke-width="1.2" fill="#f3c95c" fill-opacity=".35"/><path d="m7 13 5-6 5 6-5 4Z" fill="#f3c95c" fill-opacity=".9" stroke="none"/>',
+      master: RANK_BASE + `<path d="${WING_L}M${WING_R.slice(1)}" stroke-width="1.25" fill="currentColor" fill-opacity=".3"/>`,
+      gm: RANK_BASE + `<path d="${BIG_L}M${BIG_R.slice(1)}" stroke-width="1.25" fill="currentColor" fill-opacity=".32"/><path d="${CROWN}" stroke-width="1.1" fill="currentColor" fill-opacity=".45"/>`,
+      challenger: RANK_BASE + `<path d="${OUTER_L}M${OUTER_R.slice(1)}" stroke-width="1.1" fill="currentColor" fill-opacity=".18"/><path d="${BIG_L}M${BIG_R.slice(1)}" stroke-width="1.25" fill="currentColor" fill-opacity=".34"/><path d="${CROWN}" stroke="#f3c95c" stroke-width="1.1" fill="#f3c95c" fill-opacity=".55"/><path d="m7 13 5-6 5 6-5 4Z" fill="#f3c95c" fill-opacity=".9" stroke="none"/>`,
     };
     const RANK_TIERS = [
         { k: 'challenger', min: 2800, name: 'Challenger', color: '#3fb4ff' },
