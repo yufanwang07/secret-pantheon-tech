@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.2
+// @version      2026-11-09.3
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -429,13 +429,15 @@ td[data-challenge] > a:hover { background: color-mix(in srgb, currentColor 10%, 
 .cbc-vsus { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 36px; font: 600 11px/1 var(--cbc-mono);
   text-align: right; font-variant-numeric: tabular-nums; }
 .cbc-vsus.none { color: var(--cbc-muted); font-weight: 400; opacity: .45; font-size: 10px; }
-/* qualified teams: golden eligibility icon + gold edge and tint on their ladder row (stacks with our own row's edge) */
+/* qualified teams: golden eligibility icon and rank, gold tint fading out across the row. Our own row: its cells go
+   transparent so the tint shows, and the platform's light "you" fill is laid on top of the tint instead */
 body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qicon { color: #e9c96b !important; filter: drop-shadow(0 0 3px rgba(233,201,107,.65)); }
 body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qicon svg { color: #e9c96b !important; stroke: currentColor; }
-body:not(.cbc-noqhl) tr.cbc-qrow > td:first-child { box-shadow: inset 3px 0 0 #d9b453 !important; }
-body:not(.cbc-noqhl) tr.cbc-qrow[data-you="true"] > td:first-child { box-shadow: inset 3px 0 0 #d7d7d9, inset 6px 0 0 #d9b453 !important; }
-body:not(.cbc-noqhl) tr.cbc-qrow > td { background-image: linear-gradient(rgba(228,200,126,.065), rgba(228,200,126,.065)) !important; }
-body:not(.cbc-noqhl) tr.cbc-qrow > td:nth-child(-n+3) { background-image: linear-gradient(90deg, rgba(228,200,126,.12), rgba(228,200,126,.065)) !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow td[data-rank] > span:first-child, body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qrank { color: #e9c96b !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow { background-image: linear-gradient(90deg, rgba(228,200,126,.13), transparent 45%) !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow[data-you="true"] > td { background-color: transparent !important; }
+body:not(.cbc-noqhl) tr.cbc-qrow[data-you="true"] { background-image: linear-gradient(rgba(0,0,0,.045), rgba(0,0,0,.045)), linear-gradient(90deg, rgba(228,200,126,.16), transparent 45%) !important; }
+html[data-theme="dark"] body:not(.cbc-noqhl) tr.cbc-qrow[data-you="true"] { background-image: linear-gradient(rgba(255,255,255,.075), rgba(255,255,255,.075)), linear-gradient(90deg, rgba(228,200,126,.13), transparent 45%) !important; }
 .cbc-qual-label { cursor: pointer; }
 body.cbc-qonly tr[data-ladder-team]:not(.cbc-qrow) { display: none !important; }
 body.cbc-qonly tr.cbc-qrow td[data-rank] > span:not(.cbc-qrank):not(.cbc-vsus) { display: none !important; }
