@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.9
+// @version      2026-11-09.10
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -2124,8 +2124,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     const M_L = 'M4.8 6.5 1 5l1.6 4.6L1 12.8l3 .9', M_R = 'M19.2 6.5 23 5l-1.6 4.6 1.6 3.2-3 .9';
     const G_L = 'M5.2 6.25.6 3.8l1.8 4.8L.4 11.6l2.6 1.6-1.6 3L4 16.4', G_R = 'M18.8 6.25l4.6-2.45-1.8 4.8 2 3-2.6 1.6 1.6 3-2.6.2';
     // feather segments, top (longest, swept up) to bottom: each a separate quad whose base sits on the hex's side
-    const CH_L = 'M4.6 6.6 L-3.6 2.4 L-2.8 4.6 L4 8.6 M4 9.4 L-3.4 6.2 L-2.4 8.4 L4 11.2 M4 12 L-2.6 10.4 L-1.6 12.4 L4 13.6 M4 14.4 L-1.2 14.4 L-0.4 16.2 L4 16';
-    const CH_R = 'M19.4 6.6 L27.6 2.4 L26.8 4.6 L20 8.6 M20 9.4 L27.4 6.2 L26.4 8.4 L20 11.2 M20 12 L26.6 10.4 L25.6 12.4 L20 13.6 M20 14.4 L25.2 14.4 L24.4 16.2 L20 16';
+    const CH_L = 'M4.6 6.6 L-2.08 2.64 L-1.44 4.84 L4 8.6 M4 9.4 L-1.92 6.34 L-1.12 8.54 L4 11.2 M4 12 L-1.28 10.54 L-0.48 12.54 L4 13.6 M4 14.4 L-0.16 14.54 L0.48 16.34 L4 16';
+    const CH_R = 'M19.4 6.6 L26.08 2.64 L25.44 4.84 L20 8.6 M20 9.4 L25.92 6.34 L25.12 8.54 L20 11.2 M20 12 L25.28 10.54 L24.48 12.54 L20 13.6 M20 14.4 L24.16 14.54 L23.52 16.34 L20 16';
     const C_L = 'M1.4 4.6-2.6 1.6l1 4.2-2.4 2.2 2.4 1.4-1.8 2.8 2.6.4-1 3 3.4-.8', C_R = 'M22.6 4.6l4-3-1 4.2 2.4 2.2-2.4 1.4 1.8 2.8-2.6.4 1 3-3.4-.8';
     // the short crown: its two feet sit on the hex's top edges
     const CROWN = 'M9.2 3.75 8.7 1.4l1.8 1.2L12 .5l1.5 2.1 1.8-1.2-.5 2.35';
