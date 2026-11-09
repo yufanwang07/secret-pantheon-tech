@@ -76,6 +76,7 @@ Installs from the link above update themselves (Tampermonkey checks about once a
 
 **Ladder**
 - Denser rows, team names in their tier's colour, and a **vs** column with your recent head-to-head against each team.
+- **Qualified** filter next to All / Students / Intl / UK: the teams qualified for the finals (top 8 of each finished qualifier, read from its bracket and cached), and a gold **Q** badge and edge on their rows in the normal ladder.
 
 **Tournament predictor** (a new *Predictor* entry in the sidebar)
 - Fields for sprints, UK, International and finals; sprints are single elimination, qualifiers and finals double elimination (no reset).
