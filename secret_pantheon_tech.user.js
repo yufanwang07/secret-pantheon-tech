@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.6
+// @version      2026-11-09.7
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -450,7 +450,10 @@ body.cbc-qonly tr.cbc-qrow td[data-rank] > span:not(.cbc-qrank):not(.cbc-vsus) {
 td[data-rank] span > small, .cbc-qrank small { font-size: 9.5px; color: var(--cbc-muted); opacity: .75; margin-left: 2px; }
 #cbc-qhl-toggle { position: absolute; top: 0; right: 0; font-size: 11px; }
 #cbc-qhl-toggle.on { border-color: rgba(217,180,83,.7); color: #e9c96b; }
-table:has(tr[data-ladder-team]) tr > :first-child { position: relative; white-space: nowrap; width: 84px; min-width: 84px; box-sizing: border-box;
+table:has(tr[data-ladder-team]) tr > td:first-child { position: relative; }
+/* the header cell keeps the platform's sticky positioning (the vs label inside it is placed against it) */
+table:has(tr[data-ladder-team]) thead th:first-child { position: sticky; }
+table:has(tr[data-ladder-team]) tr > :first-child { white-space: nowrap; width: 84px; min-width: 84px; box-sizing: border-box;
   padding-right: 50px !important; font-variant-numeric: tabular-nums; }
 table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 400; font-size: 10px; opacity: .7; }
 .cbc-matches .cbc-block + .cbc-block { margin-top: 14px; }
