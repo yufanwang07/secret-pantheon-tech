@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-10.4
+// @version      2026-11-10.5
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -134,8 +134,8 @@
    so the compact view off resets them to look exactly like every other row (when on, our own cbc-qrow, which is
    more specific, paints over this). */
 tr[data-ladder-team][data-finalist], tr[data-ladder-team][data-finalist]:hover { background-image: none !important; }
-tr[data-ladder-team][data-finalist] [data-rank], tr[data-ladder-team][data-finalist] [data-rank] > span { color: inherit !important; }
-.team-badges span[data-finalist] { color: inherit !important; filter: none !important; }
+tr[data-ladder-team][data-finalist] [data-rank], tr[data-ladder-team][data-finalist] [data-rank] > span { color: var(--muted-ink, #b2b6b2) !important; }
+.team-badges span[data-finalist] { color: var(--muted-ink, #b2b6b2) !important; filter: none !important; }
 .cbc-toggle { font: 500 11px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase;
   color: color-mix(in srgb, currentColor 58%, transparent); background: none;
   border: 1px solid color-mix(in srgb, currentColor 13%, transparent); border-radius: 3px; padding: 2px 7px; cursor: pointer; }
