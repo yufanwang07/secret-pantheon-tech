@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-09.11
+// @version      2026-11-10.1
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -322,7 +322,7 @@ body.cbc-on-matches details.match-advanced summary { font-size: 12px; }
 .cbc-list { border: 1px solid var(--cbc-line); border-radius: 4px; overflow-y: auto; background: var(--cbc-panel); }
 .cbc-list.tall { max-height: 78vh; }
 .cbc-list.short { max-height: 34vh; }
-.cbc-row { display: grid; grid-template-columns: minmax(0,1fr) 3.4em 2.8em 3.6em 2.8em 3.4em minmax(0,1fr) 4.6em 4.4em;
+.cbc-row { display: grid; grid-template-columns: minmax(0,1fr) 3.4em 2.8em 3.9em 2.8em 3.4em minmax(0,1fr) 4.6em 4.4em;
   align-items: center; gap: 0 6px; padding: 0 10px; height: 29px; border-top: 1px solid var(--cbc-line); cursor: pointer;
   font-variant-numeric: tabular-nums; text-decoration: none; }
 .cbc-row:first-child { border-top: 0; }
@@ -351,7 +351,7 @@ body.cbc-on-matches details.match-advanced summary { font-size: 12px; }
 .cbc-row .dl { font: 11px var(--cbc-mono); }
 .cbc-row .dl.l { text-align: right; }
 .cbc-row .dl.up { color: var(--cbc-win); } .cbc-row .dl.down { color: var(--cbc-loss); }
-.cbc-row .sc { text-align: center; font-weight: 700; font-family: var(--cbc-mono); }
+.cbc-row .sc { text-align: center; font-weight: 700; font-family: var(--cbc-mono); white-space: nowrap; }
 .cbc-row .sc.pending { color: var(--cbc-muted); font-weight: 400; }
 .cbc-row .cbc-crown { width: 12px; height: 12px; color: #e8b84a; vertical-align: -1px; margin: 0 5px; flex: none; }
 .cbc-row .nm { display: flex; align-items: center; min-width: 0; }
