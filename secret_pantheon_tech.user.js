@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-10.2
+// @version      2026-11-10.3
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -126,8 +126,26 @@
     };
 
     // ---------------------------------------------------------------- styles
+    // Always on, compact view or not (owner, 11-10): the platform's Finalist trophies stay hidden, and the switch
+    // keeps its look. With the compact view off this is all the script adds, so the platform's UI shows untouched.
+    const BASE_CSS = `
+[role="img"][aria-label="Finalist"], [title="Finalist"][role="img"] { display: none !important; }
+.cbc-toggle { font: 500 11px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase;
+  color: color-mix(in srgb, currentColor 58%, transparent); background: none;
+  border: 1px solid color-mix(in srgb, currentColor 13%, transparent); border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+.cbc-toggle:hover { color: inherit; }
+.cbc-switch-ladder { position: absolute; top: 0; right: 0; }
+`;
+    function injectBase() {
+        if (document.getElementById('cbc-base')) return;
+        const st = document.createElement('style');
+        st.id = 'cbc-base';
+        st.textContent = BASE_CSS;
+        (document.head || document.documentElement)?.append(st);
+    }
     function injectStyle() {
-        if (document.getElementById('cbc-style')) return;
+        injectBase();
+        if (!settings.enabled || document.getElementById('cbc-style')) return;
         const css = `
 .cbc-viewer-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 10px; }
 .cbc-viewer-label { font-size: 12px; color: var(--cbc-muted); margin-right: 4px; }
@@ -433,9 +451,9 @@ td[data-challenge] > a:hover { background: color-mix(in srgb, currentColor 10%, 
 .cbc-rank-svg { overflow: visible; width: 1.3rem; height: 1.3rem; color: var(--tier-color); }
 span[data-icon-only] .cbc-rank-svg { width: 1.35rem; height: 1.35rem; }
 .cbc-rank-gm .cbc-rank-svg { filter: drop-shadow(0 0 2.5px rgba(232,48,74,.6)); }
-.cbc-rank-challenger .cbc-rank-svg { filter: drop-shadow(0 0 3px rgba(63,180,255,.7)) drop-shadow(0 0 1.5px rgba(243,201,92,.5)); animation: cbc-chall 3.2s ease-in-out infinite; }
+.cbc-rank-challenger .cbc-rank-svg { filter: drop-shadow(0 0 2.3px rgba(63,180,255,.55)) drop-shadow(0 0 1.1px rgba(243,201,92,.4)); animation: cbc-chall 3.2s ease-in-out infinite; }
 .cbc-rank-fih .cbc-rank-svg { filter: drop-shadow(0 0 3px rgba(143,168,182,.85)); animation: cbc-chall 3.6s ease-in-out infinite; }
-@keyframes cbc-chall { 50% { filter: drop-shadow(0 0 5px rgba(63,180,255,.9)) drop-shadow(0 0 2.5px rgba(243,201,92,.7)); } }
+@keyframes cbc-chall { 50% { filter: drop-shadow(0 0 3.8px rgba(63,180,255,.72)) drop-shadow(0 0 1.9px rgba(243,201,92,.55)); } }
 /* qualified teams: golden eligibility icon and rank, gold tint fading out across the row. Our own row: its cells go
    transparent so the tint shows, and the platform's light "you" fill is laid on top of the tint instead */
 body:not(.cbc-noqhl) tr.cbc-qrow .cbc-qicon { color: #e9c96b !important; filter: drop-shadow(0 0 3px rgba(233,201,107,.65)); }
@@ -753,7 +771,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     function compactSwitch() {
         return h('button', {
             class: 'cbc-toggle', title: 'Switch between the compact view and cambc\'s original layout',
-            onclick: () => { settings.enabled = !settings.enabled; save(); prehide(); unmount(); route(); }
+            onclick: () => { settings.enabled = !settings.enabled; save(); location.reload(); }
         }, settings.enabled ? 'original view' : 'compact view');
     }
 
@@ -2360,6 +2378,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         if (routing || !document.body) return;
         routing = true;
         try {
+            if (!settings.enabled) { injectBase(); switchWhenOff(); return; }
             injectStyle();
             retint();
             rankIcons();
@@ -2377,9 +2396,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const team = p.match(/^\/game\/team(?:\/([0-9a-f-]{36}))?\/?$/i);
             const matches = /^\/game\/matches\/?$/.test(p) && !new URLSearchParams(location.search).has('challenge');
             const key = team ? 'team:' + (team[1] || 'me') : matches ? 'matches' : null;
-            if (!settings.enabled || !key) {
+            if (!key) {
                 if (mounted) unmount();
-                if (key && !settings.enabled) mountSwitchOnly(key);
                 return;
             }
             if (team) {
@@ -2393,6 +2411,19 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             if (team) await mountTeam(key, team[1]);
             else await mountMatches(key);
         } finally { routing = false; }
+    }
+    function switchWhenOff() {
+        const p = location.pathname;
+        if (/^\/game\/team(?:\/[0-9a-f-]{36})?\/?$/i.test(p)) mountSwitchOnly('team');
+        else if (/^\/game\/matches\/?$/.test(p)) mountSwitchOnly('matches');
+        else if (/^\/game\/ladder/.test(p) && !document.querySelector('.cbc-switch-only')) {
+            const title = [...document.querySelectorAll('h1')].find(e => e.textContent.trim() === 'Ladder');
+            const head = title?.parentElement?.parentElement;
+            if (!head) return;
+            const b = compactSwitch(); b.classList.add('cbc-switch-only', 'cbc-switch-ladder');
+            head.style.position ||= 'relative';
+            head.append(b);
+        }
     }
     function mountSwitchOnly(key) {
         if (document.querySelector('.cbc-switch-only')) return;
@@ -2412,7 +2443,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         const matches = on && /^\/game\/matches\/?$/.test(p) && !new URLSearchParams(location.search).has('challenge');
         document.documentElement.classList.toggle('cbc-pre-team', !!team);
         document.documentElement.classList.toggle('cbc-pre-matches', !!matches);
-        document.documentElement.classList.toggle('cbc-pre-pred', /^\/game\/predictor\/?$/.test(p));
+        document.documentElement.classList.toggle('cbc-pre-pred', on && /^\/game\/predictor\/?$/.test(p));
         // never leave the page blank: if mounting hasn't happened in 4s, show cambc's own layout
         clearTimeout(prehide.t);
         if (team) prehide.t = setTimeout(() => { if (!document.body?.classList.contains('cbc-on')) document.documentElement.classList.remove('cbc-pre-team'); }, 4000);
@@ -2420,14 +2451,14 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     const origInsertRule = CSSStyleSheet.prototype.insertRule;
     CSSStyleSheet.prototype.insertRule = function (rule, index) {
         const i = origInsertRule.call(this, rule, index);
-        try { const r = this.cssRules[i]; if (r) retintRules([r]); } catch { }
+        if (settings.enabled) try { const r = this.cssRules[i]; if (r) retintRules([r]); } catch { }
         return i;
     };
     let routeQueued = false;
     const queueRoute = () => {
         if (routeQueued) return;
         routeQueued = true;
-        requestAnimationFrame(() => { routeQueued = false; retint(); route(); });
+        requestAnimationFrame(() => { routeQueued = false; if (settings.enabled) retint(); route(); });
     };
     // the <html> element may not exist yet this early
     const early = () => {
