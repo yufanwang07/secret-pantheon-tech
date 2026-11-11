@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-11.2
+// @version      2026-11-11.4
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -220,6 +220,11 @@ a.cbc-pred-nav[aria-current="page"] { background: var(--nav-active-bg) !importan
 .cbc-de .sec { position: absolute; left: 0; font: 600 10px var(--cbc-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--cbc-gold); }
 .cbc-de .m { position: absolute; width: 148px; border: 1px solid var(--cbc-line); border-radius: 4px; background: var(--cbc-panel); overflow: hidden; }
 .cbc-de .m.gf { border-color: var(--cbc-gold); }
+/* played (live results): greyed, score instead of odds; predicted upsets: orange edge + tag */
+.cbc-de .m.locked, .cbc-tree .box.locked { filter: grayscale(1); opacity: .55; border-style: dashed; }
+.cbc-de .m.upset, .cbc-tree .box.upset { border-color: #f08c2e; box-shadow: 0 0 0 1px #f08c2e55; overflow: visible; }
+.cbc-de .m.upset::after, .cbc-tree .box.upset::after { content: 'upset'; position: absolute; right: 3px; top: -8px; padding: 0 3px; border-radius: 3px; background: #f08c2e; color: #1a1205; font: 700 8px/11px var(--cbc-mono); text-transform: uppercase; letter-spacing: .04em; }
+.cbc-tree .box { position: relative; }
 .cbc-de .t { display: grid; grid-template-columns: 26px minmax(0, 1fr) 30px; gap: 3px; align-items: center; height: 16px; padding: 0 5px; font-size: 10.5px; color: var(--cbc-muted); }
 .cbc-de .t + .t { border-top: 1px solid var(--cbc-line); }
 .cbc-de .t.win { color: inherit; background: color-mix(in srgb, var(--cbc-win) 14%, transparent); box-shadow: inset 2px 0 0 var(--cbc-win); font-weight: 600; }
@@ -611,7 +616,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     }
 
     // A paginated list of match groups backed by /match-groups?<query>.
-    function groupList({ query, ctx, title, size = 'tall', minRows = 25, refreshMs = 0, filter = null, emptyText = 'No matches', noMore = false }) {
+    function groupList({ query, ctx, title, size = 'tall', minRows = 25, refreshMs = 0, filter = null, emptyText = 'No matches', noMore = false, onRows = null }) {
         const state = { groups: [], next: null, more: false, loading: false, dead: false, total: null, open: new Set() };
         const count = h('span', { class: 'cnt' });
         const list = h('div', { class: `cbc-list ${size}` }, h('div', { class: 'cbc-empty' }, 'Loading…'));
@@ -628,6 +633,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             list.replaceChildren(...(rows.length ? els : [h('div', { class: 'cbc-empty' }, state.loading ? 'Loading…' : emptyText)]));
             count.textContent = rows.length ? `${rows.length}${state.more ? '+' : ''} ${size === 'short' ? '' : 'loaded'}`.trim() : '';
             more.style.display = state.more && !noMore ? '' : 'none';
+            onRows?.(rows);
         }
         async function load(append) {
             if (state.loading || state.dead) return;
@@ -949,7 +955,19 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         const build = (query) => {
             if (hist) { hist.destroy(); subs.splice(subs.indexOf(hist), 1); }
             const act = settings.activeUnranked && mine.teamId;
-            hist = groupList({ query, ctx, title: act ? 'History · active bot, unranked' : 'History', minRows: 50, refreshMs: 20000, filter: act ? g => notLive(g) && onlyActive(g) : notLive });
+            const qp = new URLSearchParams(query), tId = !act && qp.get('team'), oId = !act && qp.get('opponent');
+            let pairKey = '', pairRun = 0;
+            const onRows = !(tId && oId) ? null : rows => { // a specific 1v1 in the filters: the side panel covers just these games
+                const fin = rows.filter(g => g.status === 'finished'), k = fin.map(g => g.id).join();
+                if (k === pairKey) return; pairKey = k;
+                const run = ++pairRun, side = id => rows[0]?.sides.find(x => x.teamId === id)?.teamName || '…';
+                const base = { teamName: side(tId), oppName: side(oId), recs: [], loading: true, done: 0, total: fin.length };
+                panel.setPair(base);
+                pairRecs(fin, tId, (done, total) => { if (run === pairRun && (done === total || done % 5 === 0)) panel.setPair({ ...base, done, total }); })
+                    .then(recs => { if (run === pairRun) panel.setPair({ ...base, recs, loading: false }); });
+            };
+            if (!(tId && oId)) panel.setPair(null);
+            hist = groupList({ query, ctx, title: act ? 'History · active bot, unranked' : 'History', minRows: 50, refreshMs: 20000, filter: act ? g => notLive(g) && onlyActive(g) : notLive, onRows });
             hist.query = query;
             subs.push(hist); histBox.replaceChildren(hist.el);
         };
@@ -1125,12 +1143,25 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             h('b', { style: `color:${wrColor(s.wr)}` }, pct(s.wr)),
             h('small', {}, extra ?? s.n));
         const section = (title, rows) => rows.length ? [h('h3', {}, title), ...rows] : [];
+        // set when the matches filters name both a team and an opponent: the stats then cover just those visible games
+        let pair = null;
+        const title = el.querySelector('h2'), ctl = el.querySelector('.cbc-statctl');
         function paint() {
-            const recs = statsScope(stats.recs);
-            status.textContent = stats.loading ? (stats.toFetch ? `loading ${stats.fetched}/${stats.toFetch}…` : `listing ${stats.listing || 0}…`) : stats.error ? 'error: ' + stats.error : `${recs.length} games`;
+            title.textContent = pair ? `${pair.teamName} vs ${pair.oppName}` : 'Statistics of interest';
+            ctl.style.display = pair ? 'none' : '';
+            if (pair) {
+                status.textContent = pair.loading ? `loading ${pair.done}/${pair.total}…` : `${pair.recs.length} games · visible matches`;
+                if (!pair.recs.length) { body.replaceChildren(h('div', { class: 'cbc-empty' }, pair.loading ? 'Loading match details…' : 'No finished games in view')); return; }
+                return paintRecs(pair.recs, true);
+            }
+            paintRecs(statsScope(stats.recs), false);
+        }
+        function paintRecs(recs, isPair) {
+            if (!isPair) status.textContent = stats.loading ? (stats.toFetch ? `loading ${stats.fetched}/${stats.toFetch}…` : `listing ${stats.listing || 0}…`) : stats.error ? 'error: ' + stats.error : `${recs.length} games`;
             if (!recs.length) { body.replaceChildren(h('div', { class: 'cbc-empty' }, stats.loading ? 'Loading match details…' : 'No games in this range')); return; }
             const all = normWR(recs);
-            const v = recs[0] && ['latest', 'newest', undefined].includes(settings.statsScope) ? recs[0].ver : null;
+            if (isPair) all.wr = mapNormWR(recs).wr; // one opponent: normalize over maps instead
+            const v = !isPair && recs[0] && ['latest', 'newest', undefined].includes(settings.statsScope) ? recs[0].ver : null;
             const maps = [...groupBy(recs, r => [r.map])].map(([k, rs]) => [k, normWR(rs)]).filter(([, s]) => s.n >= 3).sort((a, b) => b[1].wr - a[1].wr);
             const vsChamp = [...groupBy(recs, r => r.oppDraft.split(','))].map(([k, rs]) => [CHAMP_NAMES[k] ?? k, normWR(rs)]).filter(([, s]) => s.n >= 5).sort((a, b) => b[1].wr - a[1].wr);
             const ourChamp = [...groupBy(recs, r => r.ourDraft.split(','))].map(([k, rs]) => [CHAMP_NAMES[k] ?? k, normWR(rs)]);
@@ -1140,14 +1171,15 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const ends = rs => { const m = {}; for (const r of rs) m[r.end || '?'] = (m[r.end || '?'] || 0) + 1; return Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${Math.round(100 * n / rs.length)}%`).join(' · '); };
             body.replaceChildren(
                 h('div', { class: 'cbc-shead' },
-                    h('div', {}, h('div', { class: 'big', style: `color:${wrColor(all.wr)}` }, pct(all.wr)), h('small', {}, 'normalized win rate')),
+                    h('div', {}, h('div', { class: 'big', style: `color:${wrColor(all.wr)}` }, pct(all.wr)), h('small', {}, isPair ? 'map-normalized win rate' : 'normalized win rate')),
                     h('div', {}, h('div', { class: 'mid' }, pct(all.raw)), h('small', {}, 'raw')),
-                    h('div', {}, h('div', { class: 'mid' }, String(all.opps)), h('small', {}, 'opponents')),
+                    isPair ? h('div', {}, h('div', { class: 'mid' }, String(new Set(recs.map(r => r.gid)).size)), h('small', {}, 'matches'))
+                        : h('div', {}, h('div', { class: 'mid' }, String(all.opps)), h('small', {}, 'opponents')),
                     v != null && v >= 0 ? h('div', {}, h('div', { class: 'mid' }, 'v' + v), h('small', {}, 'version')) : null),
                 ...section('By map', maps.map(([k, s]) => bar(k.replace(/^\d\d/, ''), s))),
                 ...section('Vs enemy champion', vsChamp.map(([k, s]) => bar(k, s))),
                 ...(new Set(recs.map(r => r.ourDraft)).size > 1 ? section('With our pick', ourChamp.filter(([, s]) => s.n >= 5).sort((a, b) => b[1].wr - a[1].wr).map(([k, s]) => bar(k, s))) : []),
-                ...section('Toughest opponents (map-normalized)', opps.slice(0, 6).map(([k, s]) => bar(k, s))),
+                ...(isPair ? [] : section('Toughest opponents (map-normalized)', opps.slice(0, 6).map(([k, s]) => bar(k, s)))),
                 ...section('Games', [
                     h('div', { class: 'cbc-sline' }, h('span', {}, 'avg length'), h('b', {}, `${avg(wins)} won · ${avg(losses)} lost`)),
                     h('div', { class: 'cbc-sline' }, h('span', {}, 'wins end by'), h('b', {}, ends(wins) || '–')),
@@ -1156,7 +1188,26 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         stats.listeners.add(paint);
         paint();
         loadStats();
-        return { el, paint, destroy() { stats.listeners.delete(paint); } };
+        return { el, paint, setPair(p) { pair = p; paint(); }, destroy() { stats.listeners.delete(paint); } };
+    }
+    // Per-game records of `teamId` in the given groups (same shape as stats.recs), from each group's detail; details
+    // of finished groups never change, so they're kept for the session.
+    const pairDetail = new Map();
+    async function pairRecs(groups, teamId, onProgress) {
+        const fin = groups.filter(g => g.status === 'finished'), out = [];
+        let done = 0; const q = [...fin];
+        await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {
+            for (let g; (g = q.shift());) {
+                try {
+                    if (!pairDetail.has(g.id)) pairDetail.set(g.id, await api(`/match-groups/${g.id}`));
+                    const c = compactGroup(pairDetail.get(g.id), teamId);
+                    for (const [map, opp, oppName, ver, res, oppDraft, ourDraft, end, rounds, oppVer] of c.m)
+                        out.push({ gid: g.id, t: c.t, kind: c.k, map, opp, oppName, ver, res, oppDraft, ourDraft, end, rounds, oppVer: oppVer ?? null });
+                } catch { }
+                onProgress(++done, fin.length);
+            }
+        }));
+        return out;
     }
 
     // ---------------------------------------------------------------- champion picks
@@ -1459,6 +1510,37 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     }
     // pair key "lo|hi" (ids sorted) -> { w, n: weighted maps won by lo / played, raw: maps, g: groups }
     let predFreezeAt = null; // set by the predictor for the tab it's showing
+    // Results already played in the tournament the tab shows (empty in pure-predictor mode): "<u|l|f>|<lo>|<hi>" (field
+    // indices) -> { w: winner index, s: [maps won by lo, by hi] }. The simulations take these as given, and the bracket
+    // draws them greyed out, with the score instead of odds.
+    let predKnown = new Map();
+    function knownGet(br, a, b) {
+        if (a == null || b == null || a < 0 || b < 0 || !predKnown.size) return null;
+        return predKnown.get(br + '|' + Math.min(a, b) + '|' + Math.max(a, b)) || null;
+    }
+    const knownScore = (k, i) => { const lo = i === k.lo; return `${k.s[lo ? 0 : 1]}–${k.s[lo ? 1 : 0]}`; };
+    // the platform bracket's played matches, by field index; the grand final is locked only once its champion is
+    // certain (upper-bracket side won it, or the reset has been played)
+    function knownResults(d, field) {
+        const at = new Map(field.map((f, i) => [f.id, i])), out = new Map();
+        // only what the tournament page shows: revealed matches (unrevealed ones can carry results the stream hasn't shown yet)
+        const done = m => m && m.status === 'finished' && m.revealed === true && m.winner?.teamId && m.a?.teamId && m.b?.teamId;
+        const put = (br, m, winnerId) => {
+            const a = at.get(m.a.teamId), b = at.get(m.b.teamId), w = at.get(winnerId);
+            if (a == null || b == null || w == null) return;
+            const lo = Math.min(a, b), aw = m.aWins ?? (w === a ? 1 : 0), bw = m.bWins ?? (w === b ? 1 : 0);
+            out.set(br + '|' + lo + '|' + Math.max(a, b), { w, lo, s: lo === a ? [aw, bw] : [bw, aw] });
+        };
+        const bracket = d?.bracket || [];
+        for (const m of bracket) if (done(m) && (m.bracket === 'upper' || m.bracket === 'lower')) put(m.bracket === 'upper' ? 'u' : 'l', m, m.winner.teamId);
+        const fin = bracket.find(m => m.bracket === 'final'), reset = bracket.find(m => m.bracket === 'reset');
+        if (done(fin)) {
+            const ubSide = bracket.find(m => m.bracket === 'upper' && m.winnerTo === fin.code)?.winnerSide; // side the upper-bracket winner sits on
+            if (done(reset)) put('f', fin, reset.winner.teamId);
+            else if (ubSide && fin.winner.teamId === fin[ubSide]?.teamId) put('f', fin, fin.winner.teamId);
+        }
+        return out;
+    }
     function fieldPairs() {
         const Sx = predFreezeAt != null && predFreezeAt <= Date.now() ? predFreezeAt : null;
         if (fieldH2H.pairs && fieldH2H.pairsS === Sx) return fieldH2H.pairs;
@@ -1531,7 +1613,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         const noteLb = (r, lb, drop) => { if (lb.length > 32) return; const c = lbCols[r] ??= { len: lb.length, drop, slots: lb.map(() => new Map()) };
             lb.forEach((t, k) => { if (t != null) c.slots[k].set(t, (c.slots[k].get(t) || 0) + 1); }); };
         let done = 0;
-        const play = (a, b) => a == null ? b : b == null ? a : (Math.random() < P2(a, b) ? a : b);
+        const play = (a, b, br) => a == null ? b : b == null ? a : (knownGet(br, a, b)?.w ?? (Math.random() < P2(a, b) ? a : b));
         // Per-run log of every tracked match (late rounds, both brackets, grand final) in play order: [a, b, winner] as
         // field index + 1 (0 = bye). The most common bracket is read off this by descending the run tree (mostCommon).
         const keys = []; let K = -1, log = null, k = 0;
@@ -1548,7 +1630,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                 const nu = [], losers = [];
                 const trackU = ub.length <= 64;
                 if (trackU) { const pr = []; for (let i = 0; i < ub.length; i += 2) pr.push([ub[i], ub[i + 1]]); noteM(ubM[ur] ??= [], pr); }
-                for (let i = 0; i < ub.length; i += 2) { const w = play(ub[i], ub[i + 1]); nu.push(w); losers.push(w == null ? null : w === ub[i] ? ub[i + 1] : ub[i]);
+                for (let i = 0; i < ub.length; i += 2) { const w = play(ub[i], ub[i + 1], 'u'); nu.push(w); losers.push(w == null ? null : w === ub[i] ? ub[i + 1] : ub[i]);
                     if (trackU) rec(`u${ur}:${i / 2}`, ub[i], ub[i + 1], w); }
                 ur++;
                 ub = nu;
@@ -1559,7 +1641,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                     const drops = dropFlip && half ? losers.slice(half).concat(losers.slice(0, half)) : losers; dropFlip = !dropFlip;
                     const nl = [], elim = [];
                     if (lb.length <= 32) { lbM[lr] ??= { drop: true, pairs: [] }; noteM(lbM[lr].pairs, lb.map((a, i) => [a, drops[i]])); }
-                    for (let i = 0; i < lb.length; i++) { const a = lb[i], b = drops[i], w = play(a, b); nl.push(w); if (a != null && b != null) elim.push([w === a ? b : a, w]);
+                    for (let i = 0; i < lb.length; i++) { const a = lb[i], b = drops[i], w = play(a, b, 'l'); nl.push(w); if (a != null && b != null) elim.push([w === a ? b : a, w]);
                         if (lb.length <= 32) rec(`l${lr}:${i}`, a, b, w); }
                     alive -= elim.length; for (const [l, w] of elim) out(l, w, alive);
                     lb = nl; noteLb(lr++, lb, true);
@@ -1567,7 +1649,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                 while (lb.length > Math.max(1, ub.length / 2)) { // plain rounds until it matches the next batch of drop-ins
                     const nl = [], elim = [];
                     if (lb.length <= 64) { const pr = []; for (let i = 0; i < lb.length; i += 2) pr.push([lb[i], lb[i + 1]]); lbM[lr] ??= { drop: false, pairs: [] }; noteM(lbM[lr].pairs, pr); }
-                    for (let i = 0; i < lb.length; i += 2) { const a = lb[i], b = lb[i + 1], w = play(a, b); nl.push(w); if (a != null && b != null) elim.push([w === a ? b : a, w]);
+                    for (let i = 0; i < lb.length; i += 2) { const a = lb[i], b = lb[i + 1], w = play(a, b, 'l'); nl.push(w); if (a != null && b != null) elim.push([w === a ? b : a, w]);
                         if (lb.length <= 64) rec(`l${lr}:${i / 2}`, a, b, w); }
                     alive -= elim.length; for (const [l, w] of elim) out(l, w, alive);
                     lb = nl; noteLb(lr++, lb, false);
@@ -1577,7 +1659,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const champ = ub[0], chall = lb[0];
             if (champ != null) gf[0].set(champ, (gf[0].get(champ) || 0) + 1);
             if (chall != null) gf[1].set(chall, (gf[1].get(chall) || 0) + 1);
-            const w = play(champ, chall);
+            const w = play(champ, chall, 'f');
             rec('gf', champ, chall, w);
             if (K < 0) { K = keys.length; log = new Int16Array(sims * K * 3); }
             if (champ != null && chall != null) { const l = w === champ ? chall : champ; alive--; out(l, w, alive); }
@@ -1594,7 +1676,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
 
     function predict(field, games, mineId, slots = seedSlots(field)) { // slots: first-round field index per slot, null = bye
         const n = field.length, size = slots.length;
-        const pBeat = predictPairs(field, games, mineId);
+        const pb0 = predictPairs(field, games, mineId);
+        const pBeat = (a, b) => { const k = knownGet('u', a, b); return k ? (k.w === a ? 1 : 0) : pb0(a, b); };
         const rounds = Math.log2(size);
         // reach[i][r] = P(team i wins its round-r match) (r = 0..rounds-1); lossTo[i][r] = Map(opponent -> P(lose to them in r))
         const reach = field.map(() => new Float64Array(rounds));
@@ -1660,16 +1743,21 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             verSel.value = settings.predVer != null && vs.includes(+settings.predVer) ? String(settings.predVer) : '';
         };
         const body = h('div', {}, h('div', { class: 'cbc-empty' }, 'Loading ladder…'));
+        // live (played matches locked in as the tournament page reveals them) or the pure prediction
+        const pureBtn = h('button', { class: 'cbc-toggle cbc-purebtn', title: 'live: the tournament\'s revealed results are locked in · pure: the prediction alone, as at the freeze',
+            onclick: () => { settings.predPure = !settings.predPure; save(); pureBtn.textContent = settings.predPure ? 'pure' : 'live'; pureBtn.setAttribute('aria-pressed', String(!settings.predPure)); paint(); } },
+            settings.predPure ? 'pure' : 'live');
+        pureBtn.setAttribute('aria-pressed', String(!settings.predPure));
         root.append(h('div', { class: 'cbc-head' },
             h('div', {}, h('div', { class: 'cbc-titleline' }, h('h1', {}, 'Tournament predictor')),
                 subLine = h('div', { class: 'cbc-sub' }, '')),
-            h('div', { class: 'cbc-actions' }, tabs, verSel, gamesSel)), body);
+            h('div', { class: 'cbc-actions' }, tabs, pureBtn, verSel, gamesSel)), body);
         for (const [k, f] of Object.entries(PRED_FIELDS)) tabs.append(h('button', { class: 'cbc-toggle', 'data-k': k,
             onclick: () => { sessionStorage.setItem(LS + 'predField', k); paint(); } }, f.label));
         // default tab = the next scheduled tournament's field
-        let upcoming = null;
+        let upcoming = null, ts = [];
         try {
-            const ts = (await api('/tournaments')).tournaments || [];
+            ts = (await api('/tournaments')).tournaments || [];
             upcoming = ts.filter(t => t.status !== 'complete').sort((a, b) => Date.parse(a.qualificationAt || a.seedingEndsAt) - Date.parse(b.qualificationAt || b.seedingEndsAt))[0] || null;
             // none scheduled: the latest tournament that has run but whose matches are still hidden ("unpublished",
             // e.g. a qualifier held back for the stream) is still a prediction, with its frozen seeds
@@ -1683,18 +1771,36 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         // the upcoming tournament's own series length is the default (qualifiers are bo21)
         let ladderRows = null;
         try { ladderRows = await predLadder(); } catch (e) { body.replaceChildren(h('div', { class: 'cbc-empty' }, 'Could not load the ladder (' + e.message + ')')); return true; }
-        // the upcoming tournament's real seeds, once frozen (only for its own tab; others stay ladder-seeded)
-        let frozen = null;
-        if (upcoming?.seededAt && Date.parse(upcoming.seededAt) <= Date.now())
-            try { frozen = frozenSeeding(await predTournament(upcoming.id), ladderRows); } catch { }
+        // The tournament each tab shows: the upcoming one for its own tab, else the latest one of that kind whose seeding
+        // has frozen (so a tournament that has already run keeps its prediction, pure or with its real results locked
+        // in). Tabs without one stay on the live ladder.
+        const tabTour = fk => {
+            if (upcoming && fk === upcomingKey) return upcoming;
+            const fits = t => fk === 'sprint' ? t.kind === 'sprint' || t.eligibility === 'sprint'
+                : fk === 'finals' ? t.kind !== 'sprint' && (t.eligibilityGroups || []).length > 1
+                : t.kind !== 'sprint' && (t.eligibilityGroups || []).length === 1 && t.eligibilityGroups[0] === fk;
+            return ts.filter(t => fits(t) && t.seededAt && Date.parse(t.seededAt) <= Date.now()).sort((a, b) => Date.parse(b.seededAt) - Date.parse(a.seededAt))[0] || null;
+        };
+        const tabData = new Map(); // fk -> { t, d, frozen, sig }
+        const loadTab = async (fk, fresh) => {
+            const t = tabTour(fk); if (!t) return null;
+            const d = fresh ? await api(`/tournaments/${t.id}`) : await predTournament(t.id);
+            const prev = tabData.get(fk), frozen = prev?.frozen || (t.seededAt && Date.parse(t.seededAt) <= Date.now() ? frozenSeeding(d, ladderRows) : null);
+            const sig = (d.bracket || []).map(m => m.code + ':' + m.status + ':' + (m.winner?.teamId || '') + ':' + (m.aWins ?? '') + '-' + (m.bWins ?? '')).join('|');
+            const x = { t: d.tournament || t, d, frozen, sig }; tabData.set(fk, x); return x;
+        };
+        try { await loadTab(upcomingKey); } catch { }
         if (mounted?.key !== key) return true;
         // field + first-round slots for a tab: frozen tournament seeding, or the eligible ladder in rating order
         // qualifiers and finals are double elimination: the upcoming one's own format wins over the tab's default
-        const formatFor = fk => (upcoming && fk === upcomingKey && upcoming.elimination) || (upcoming && fk === upcomingKey && upcoming.kind !== 'sprint' ? 'double' : PRED_FIELDS[fk].format);
-        const fieldFor = fk => frozen && fk === upcomingKey ? { ...frozen, format: formatFor(fk) } : { field: ladderRows.filter(t => !t.dev && t.hasBot && PRED_FIELDS[fk].test(t))
+        const formatFor = fk => { const t = tabData.get(fk)?.t || (upcoming && fk === upcomingKey ? upcoming : null);
+            return t?.elimination || (t && t.kind !== 'sprint' ? 'double' : PRED_FIELDS[fk].format); };
+        const fieldFor = fk => tabData.get(fk)?.frozen ? { ...tabData.get(fk).frozen, format: formatFor(fk) } : { field: ladderRows.filter(t => !t.dev && t.hasBot && PRED_FIELDS[fk].test(t))
             .sort((a, b) => b.rating - a.rating).map((t, i) => ({ ...t, seed: i + 1 })), format: formatFor(fk) };
         const seedNote = F => F.slots ? `frozen tournament seeding (${F.fromBracket ? 'platform bracket' : 'seeds'}, captured ${new Date(F.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`
             : 'current ladder seeding · dev teams excluded';
+        const liveNote = F => !F.slots ? '' : settings.predPure ? ' · pure prediction (results hidden)'
+            : predKnown.size ? ` · live: ${predKnown.size} played match${predKnown.size === 1 ? '' : 'es'} locked in` : ' · live (no results yet)';
         const knownIds = new Set(ladderRows.filter(t => !t.dev && t.hasBot).map(t => t.id));
         const h2hNote = () => fieldH2H.busy ? ` · loading head-to-head ${fieldH2H.done}/${fieldH2H.total} teams…`
             : ` · head-to-head from ${Object.keys(fieldH2H.groups).length.toLocaleString()} ranked matches (3d, ${predFreezeAt != null && predFreezeAt <= Date.now() ? `weighted around the ${new Date(predFreezeAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} freeze` : 'freeze not yet, recent weighted'})`;
@@ -1704,16 +1810,24 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             if (!ladderRows) return;
             fillVersions();
             const fk = sessionStorage.getItem(LS + 'predField') || upcomingKey;
+            if (tabTour(fk) && !tabData.has(fk)) { // its tournament first (seeds, bracket, results)
+                body.replaceChildren(h('div', { class: 'cbc-empty' }, 'Loading tournament…'));
+                loadTab(fk).catch(() => tabData.set(fk, { t: tabTour(fk), d: null, frozen: null, sig: '' })).then(() => mounted?.key === key && paint());
+                return;
+            }
             curFormat = fieldFor(fk).format === 'double' ? 'double' : 'single';
             const games = gamesFor(curFormat); gamesSel.value = String(games);
             for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.dataset.k === fk));
             const F = fieldFor(fk), field = F.field;
             // submission freeze of the tournament this tab predicts (its snapshot); other tabs have no freeze yet
-            predFreezeAt = upcoming && fk === upcomingKey && (upcoming.snapshotAt || upcoming.qualificationAt) ? Date.parse(upcoming.snapshotAt || upcoming.qualificationAt) : null;
+            const TT = tabData.get(fk)?.t || null;
+            predFreezeAt = TT && (TT.snapshotAt || TT.qualificationAt) ? Date.parse(TT.snapshotAt || TT.qualificationAt) : null;
+            // live: the tournament's played matches are fixed; pure: the prediction as it stood at the freeze
+            predKnown = settings.predPure || !F.slots ? new Map() : knownResults(tabData.get(fk)?.d, field);
             ensureFieldH2H([...field].sort((a, b) => b.rating - a.rating).map(t => t.id), knownIds);
             if (F.format === 'double') return paintDouble(fk, games, F);
             runId++;
-            subLine.textContent = `${upcoming && upcomingKey === fk ? upcoming.name + ' · ' : ''}${seedNote(F)} · single elimination · exact solve${h2hNote()}`;
+            subLine.textContent = `${TT ? TT.name + ' · ' : ''}${seedNote(F)}${liveNote(F)} · single elimination · exact solve${h2hNote()}`;
             const t0 = performance.now();
             const P = predict(field, games, mine.teamId, F.slots);
             const ms = Math.round(performance.now() - t0);
@@ -1765,9 +1879,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             body.replaceChildren(...out);
         }
         function paintDouble(fk, games, F) {
-            const field = F.field;
+            const field = F.field, TT = tabData.get(fk)?.t || null;
             const my = ++runId, SIMS = 20000;
-            subLine.textContent = `${upcoming && upcomingKey === fk ? upcoming.name + ' · ' : ''}${seedNote(F)} · double elimination (no reset) · ${SIMS.toLocaleString()} simulations${h2hNote()}`;
+            subLine.textContent = `${TT ? TT.name + ' · ' : ''}${seedNote(F)}${liveNote(F)} · double elimination (no reset) · ${SIMS.toLocaleString()} simulations${h2hNote()}`;
             const idx = field.findIndex(t => t.id === mine.teamId);
             simulateDE(field, games, mine.teamId, SIMS, R => {
                 if (my !== runId || mounted?.key !== key) return;
@@ -1838,7 +1952,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             for (let j = 0; j < K; j++) {
                 const side = s => { const f = src[j][s]; if (!f) return mode(j, s); const m = pick[f[0]]; return f[1] === 0 ? m.w : (m.w === m.a ? m.b : m.a); };
                 const a = side(0), b = side(1);
-                const w = a < 0 ? b : b < 0 ? a : pBeat(a, b) >= 0.5 ? a : b;
+                const kn = knownGet(R.keys[j] === 'gf' ? 'f' : R.keys[j][0], a, b);
+                const w = a < 0 ? b : b < 0 ? a : kn ? kn.w : pBeat(a, b) >= 0.5 ? a : b;
                 pick[j] = { a, b, w };
                 best.set(R.keys[j], pick[j]);
             }
@@ -1895,13 +2010,19 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const mcBox = (key, p, gf) => {
                 const m = MC?.get(key);
                 if (!m) return null;
+                const kn = knownGet(gf ? 'f' : key[0], m.a, m.b);
+                // predicted upset: the favourite here is the worse seed
+                const up = !kn && m.a >= 0 && m.b >= 0 && field[m.w].seed > field[m.w === m.a ? m.b : m.a].seed;
                 const row = (i, win) => {
                     if (i < 0) return h('div', { class: 't' }, h('span', {}, ''), h('span', { class: 'nm' }, 'bye'), h('b', {}, ''));
                     return h('div', { class: 't' + (win ? ' win' : '') + (field[i].id === mine.teamId ? ' me' : '') },
-                        h('span', { class: 'sd' }, '#' + field[i].seed), h('span', { class: 'nm' }, field[i].name), h('b', {}, m.a >= 0 && m.b >= 0 ? pctS(pBeat(i, i === m.a ? m.b : m.a)) : ''));
+                        h('span', { class: 'sd' }, '#' + field[i].seed), h('span', { class: 'nm' }, field[i].name),
+                        h('b', {}, kn ? knownScore(kn, i) : m.a >= 0 && m.b >= 0 ? pctS(pBeat(i, i === m.a ? m.b : m.a)) : ''));
                 };
-                return h('div', { class: 'm' + (gf ? ' gf' : ''), style: `left:${p.x}px;top:${p.y}px`,
-                    title: m.a >= 0 && m.b >= 0 ? `bo${games} series: ${field[m.a].name} ${pctS(pBeat(m.a, m.b))} · ${field[m.b].name} ${pctS(pBeat(m.b, m.a))}` : '' }, row(m.a, m.w === m.a), row(m.b, m.w === m.b));
+                return h('div', { class: 'm' + (gf ? ' gf' : '') + (kn ? ' locked' : '') + (up ? ' upset' : ''), style: `left:${p.x}px;top:${p.y}px`,
+                    title: kn ? `played: ${field[kn.w].name} won ${knownScore(kn, kn.w)}`
+                        : m.a >= 0 && m.b >= 0 ? `${up ? 'predicted upset · ' : ''}bo${games} series: ${field[m.a].name} ${pctS(pBeat(m.a, m.b))} · ${field[m.b].name} ${pctS(pBeat(m.b, m.a))}` : '' },
+                    row(m.a, m.w === m.a), row(m.b, m.w === m.b));
             };
             const box = (pair, p, gf, key) => {
                 const mc = key && mcBox(key, p, gf);
@@ -1913,7 +2034,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                     if (i == null) return h('div', { class: 't' }, h('span', {}, ''), h('span', { class: 'nm' }, 'bye'), h('b', {}, ''));
                     return h('div', { class: 't' + (win ? ' win' : '') + (field[i].id === mine.teamId ? ' me' : ''), title: occ.slice(0, 6).map(([t, c]) => `${name(t)} ${pctS(c)} to get here`).join('\n') },
                         h('span', { class: 'sd' }, '#' + field[i].seed), h('span', { class: 'nm' }, field[i].name), h('b', {}, pctS(pr))); };
-                return h('div', { class: 'm' + (gf ? ' gf' : ''), style: `left:${p.x}px;top:${p.y}px`, title: a != null && b != null ? `if it's these two: ${field[a].name} ${pctS(pa)}` : '' },
+                const up = a != null && b != null && field[pa >= 0.5 ? a : b].seed > field[pa >= 0.5 ? b : a].seed;
+                return h('div', { class: 'm' + (gf ? ' gf' : '') + (up ? ' upset' : ''), style: `left:${p.x}px;top:${p.y}px`, title: a != null && b != null ? `${up ? 'predicted upset · ' : ''}if it's these two: ${field[a].name} ${pctS(pa)}` : '' },
                     row(A, pa >= 0.5), row(B, pa < 0.5));
             };
             const lines = [];
@@ -1993,6 +2115,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const row = (occ, win, opp) => {
                 const [i] = occ?.[0] || [], o = opp?.[0]?.[0];
                 if (i == null) return h('div', { class: 't mut' }, h('span', { class: 'sd' }, ''), h('span', {}, 'bye'), h('b', {}, ''));
+                const kn = knownGet('u', i, o);
+                if (kn) return h('div', { class: 't' + (win ? ' win' : '') + (field[i].id === me_id ? ' me' : ''), title: 'played' },
+                    h('span', { class: 'sd' }, '#' + field[i].seed), link(`/game/team/${field[i].id}`, '', field[i].name), h('b', {}, knownScore(kn, i)));
                 const q = o == null ? 1 : pBeat(i, o);
                 return h('div', { class: 't' + (win ? ' win' : '') + (field[i].id === me_id ? ' me' : ''),
                     title: 'most likely here:\n' + occ.slice(0, 5).map(([j, p]) => `#${field[j].seed} ${field[j].name} ${pctS(p)}`).join('\n') },
@@ -2008,8 +2133,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                     const a = col[k], b = col[k + 1], ai = a?.[0]?.[0], bi = b?.[0]?.[0];
                     // highlight whoever wins this pairing more often than not
                     const aw = ai != null && (bi == null || pBeat(ai, bi) >= 0.5);
+                    const kn = knownGet('u', ai, bi), up = !kn && ai != null && bi != null && field[aw ? ai : bi].seed > field[aw ? bi : ai].seed;
                     slots.append(h('div', { class: 'mt' + (last ? '' : ((k / 2) % 2 ? ' lo' : ' hi')) },
-                        h('div', { class: 'box' }, row(a, aw, b), row(b, bi != null && !aw, a))));
+                        h('div', { class: 'box' + (kn ? ' locked' : '') + (up ? ' upset' : ''), title: up ? 'predicted upset' : '' }, row(a, aw, b), row(b, bi != null && !aw, a))));
                 }
                 c.append(slots); tree.append(c);
             });
@@ -2021,7 +2147,15 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         const onH2H = fin => { if (mounted?.key !== key) return; if (fin) paint(); else if (subLine.textContent.includes('loading head-to-head'))
             subLine.textContent = subLine.textContent.replace(/ · loading head-to-head.*$/, h2hNote()); };
         fieldH2H.listeners.add(onH2H);
-        const d0 = mounted.destroy; mounted.destroy = () => { stats.listeners.delete(onStats); fieldH2H.listeners.delete(onH2H); runId++; d0(); };
+        // follow the tournament page: re-read the shown tournament's bracket while it still has unplayed or unrevealed
+        // matches, and re-run when something new is revealed
+        const poll = setInterval(async () => {
+            if (mounted?.key !== key || document.hidden) return;
+            const fk = sessionStorage.getItem(LS + 'predField') || upcomingKey, cur = tabData.get(fk);
+            if (!cur?.d || !(cur.d.bracket || []).some(m => m.status !== 'finished' && m.status !== 'bye')) return;
+            try { const old = cur.sig, x = await loadTab(fk, true); if (x.sig !== old && !settings.predPure && mounted?.key === key) paint(); } catch { }
+        }, 45e3);
+        const d0 = mounted.destroy; mounted.destroy = () => { clearInterval(poll); stats.listeners.delete(onStats); fieldH2H.listeners.delete(onH2H); runId++; d0(); };
         return true;
     }
     function predictorNav() {
