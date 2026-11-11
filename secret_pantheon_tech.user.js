@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-11.1
+// @version      2026-11-11.2
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -1391,10 +1391,10 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     // team-page matchups card reads; group scores are maps won), deduped by group, kept to games between ladder teams
     // with a bot, cached in localStorage and topped up incrementally (only groups newer than the last walk are fetched).
     const FIELD_H2H_SPAN = 3 * 864e5, FIELD_H2H_TTL = 20 * 60e3, FIELD_H2H_PAGES = 20, FIELD_H2H_TEAMS = 48, H2H_PRIOR_MAPS = 10;
-    // How much a game counts, by when it was played relative to the newer of the two bots' latest submission S:
-    // after S full weight; the SUB_PRE hours before S still a lot (often the same bot, or close to it); earlier games
-    // fade fast (SUB_TAU). With no known resubmit on either side a slow fade (NOSUB_TAU). When a pair has fewer than
-    // H2H_FILL maps' worth of recent games, its older games are scaled up (to at most the pre-window weight) to fill in;
+    // How much a game counts, by when it was played relative to the tournament's submission freeze S (the snapshot the
+    // bracket bots come from): after S full weight; the SUB_PRE hours before S still a lot; earlier games fade fast
+    // (SUB_TAU). Before the freeze has happened, a slow fade from now (NOSUB_TAU). When a pair has fewer than H2H_FILL
+    // maps' worth of near-freeze games, its older games are scaled up (to at most the pre-window weight) to fill in;
     // whatever weight there is, Elo still counts as H2H_PRIOR_MAPS maps, so no games at all = pure Elo.
     const SUB_PRE = 3 * 36e5, PRE_W = 0.6, SUB_TAU = 4 * 36e5, NOSUB_TAU = 36 * 36e5, H2H_FILL = 20;
     const fieldH2H = (() => {
@@ -1403,7 +1403,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         try { c = JSON.parse(localStorage.getItem(LS + 'fieldH2H') || 'null'); } catch { }
         if (c?.v === 3) for (const [dt, ai, bi, wa, wb, ra, rb, va, vb] of c.g) {
             const t = c.t0 + dt * 1000; groups[h2hKey(t, c.ids[ai], c.ids[bi])] = [t, c.ids[ai], c.ids[bi], wa, wb, ra, rb, va, vb]; }
-        return { groups, teams: c?.v === 3 ? c.teams : {}, busy: null, done: 0, total: 0, pairs: null, subs: null, listeners: new Set() };
+        return { groups, teams: c?.v === 3 ? c.teams : {}, busy: null, done: 0, total: 0, pairs: null, pairsS: null, listeners: new Set() };
     })();
     function h2hKey(t, a, b) { return Math.round(t / 1000) + a.slice(0, 8) + b.slice(0, 8); } // one group seen from both teams
     function saveFieldH2H() {
@@ -1447,54 +1447,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                     fieldH2H.done++; fieldH2H.listeners.forEach(f => f(false));
                 }
             }));
-            fieldH2H.pairs = fieldH2H.subs = null; saveFieldH2H();
+            fieldH2H.pairs = null; saveFieldH2H();
         })().finally(() => { fieldH2H.busy = null; fieldH2H.listeners.forEach(f => f(true)); });
         return fieldH2H.busy;
-    }
-    // Each team's latest submission time: the first game on its newest version when the API shows versions (our own
-    // team), else the latest strength shift in its results: games are scored against Elo with the team's rating held at
-    // its latest value (so a better bot shows up as over-performing until the rating catches up), and the split point
-    // with the largest before/after difference counts as a resubmit when it's clear (z >= SUB_Z, enough games after).
-    // A resubmit that doesn't change how strong the bot is can't be seen this way, but then it matters little.
-    const SUB_Z = 3, SUB_MIN_AFTER = 3;
-    function teamSubs() {
-        if (fieldH2H.subs) return fieldH2H.subs;
-        const by = new Map(), add = (id, x) => (by.get(id) || by.set(id, []).get(id)).push(x);
-        for (const [t, a, b, wa, wb, ra, rb, va, vb] of Object.values(fieldH2H.groups)) {
-            if (wa + wb === 0) continue;
-            add(a, { t, w: wa, n: wa + wb, me: ra, opp: rb, v: va }); add(b, { t, w: wb, n: wa + wb, me: rb, opp: ra, v: vb });
-        }
-        const subs = new Map();
-        for (const [id, gs] of by) {
-            gs.sort((x, y) => x.t - y.t);
-            const last = gs[gs.length - 1];
-            if (last.v != null) { // real versions
-                let i = gs.length - 1; while (i > 0 && (gs[i - 1].v == null || gs[i - 1].v === last.v)) i--;
-                if (i > 0 || gs[0].v !== last.v) subs.set(id, { t: gs[i].t, how: `v${last.v}` });
-                continue;
-            }
-            if (gs.length < 2 * SUB_MIN_AFTER || last.me == null) continue;
-            const R = last.me, res = gs.map(g => g.opp == null ? 0 : g.w - g.n / (1 + 10 ** ((g.opp - R) / 400)));
-            const totR = res.reduce((s, x) => s + x, 0), totN = gs.reduce((s, g) => s + g.n, 0);
-            let best = null, cr = 0, cn = 0;
-            for (let i = 1; i < gs.length; i++) {
-                cr += res[i - 1]; cn += gs[i - 1].n;
-                if (i < SUB_MIN_AFTER || gs.length - i < SUB_MIN_AFTER) continue;
-                const mb = cr / cn, ma = (totR - cr) / (totN - cn);
-                // map results within a series are correlated: variance per map taken as 0.5 instead of 0.25
-                const z = Math.abs(ma - mb) / Math.sqrt(0.5 * (1 / cn + 1 / (totN - cn)));
-                if (!best || z > best.z) best = { z, t: gs[i].t, d: ma - mb };
-            }
-            if (best && best.z >= SUB_Z) subs.set(id, { t: best.t, how: `${best.d > 0 ? 'stronger' : 'weaker'} since`, z: best.z });
-        }
-        return fieldH2H.subs = subs;
-    }
-    // "new 5h" after a team in the predictor's tables: when its latest submission (real or inferred) landed
-    function subTag(id) {
-        const s = teamSubs().get(id); if (!s) return null;
-        const hrs = (Date.now() - s.t) / 36e5;
-        return h('small', { class: 'mut', style: 'margin-left:6px', title: s.z ? `results shifted ${s.how} ${new Date(s.t).toLocaleString()} (z ${s.z.toFixed(1)}); games before it count less`
-            : `${s.how} since ${new Date(s.t).toLocaleString()}; games before it count less` }, `new ${hrs < 1 ? Math.max(1, Math.round(hrs * 60)) + 'm' : Math.round(hrs) + 'h'}`);
     }
     function gameWeight(t, S, now) {
         if (S == null) return Math.exp(-(now - t) / NOSUB_TAU);
@@ -1502,10 +1457,12 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         if (t >= S - SUB_PRE) return PRE_W;
         return PRE_W * Math.exp(-(S - SUB_PRE - t) / SUB_TAU);
     }
-    // pair key "lo|hi" (ids sorted) -> { w, n: weighted maps won by lo / played, raw: maps, g: groups, S }
+    // pair key "lo|hi" (ids sorted) -> { w, n: weighted maps won by lo / played, raw: maps, g: groups }
+    let predFreezeAt = null; // set by the predictor for the tab it's showing
     function fieldPairs() {
-        if (fieldH2H.pairs) return fieldH2H.pairs;
-        const subs = teamSubs(), now = Date.now(), cut = now - FIELD_H2H_SPAN, games = new Map();
+        const Sx = predFreezeAt != null && predFreezeAt <= Date.now() ? predFreezeAt : null;
+        if (fieldH2H.pairs && fieldH2H.pairsS === Sx) return fieldH2H.pairs;
+        const now = Date.now(), cut = now - FIELD_H2H_SPAN, games = new Map();
         for (const [t, a, b, wa, wb] of Object.values(fieldH2H.groups)) {
             if (t < cut || wa + wb === 0) continue;
             const flip = a > b, k = flip ? b + '|' + a : a + '|' + b;
@@ -1513,17 +1470,15 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         }
         const m = new Map();
         for (const [k, gs] of games) {
-            const [lo, hi] = k.split('|'), S = Math.max(subs.get(lo)?.t ?? -Infinity, subs.get(hi)?.t ?? -Infinity);
-            const Sx = S > -Infinity ? S : null;
             let wRecent = 0, wOld = 0;
             for (const g of gs) { g.k = gameWeight(g.t, Sx, now); if (g.k >= PRE_W) wRecent += g.k * g.n; else wOld += g.k * g.n; }
             // short on recent games: let the older ones count more (never past the pre-window weight)
             const boost = wRecent < H2H_FILL && wOld > 0 ? Math.max(1, (H2H_FILL - wRecent) / wOld) : 1;
-            const r = { w: 0, n: 0, raw: 0, g: gs.length, S: Sx };
+            const r = { w: 0, n: 0, raw: 0, g: gs.length };
             for (const g of gs) { const k = g.k >= PRE_W ? g.k : Math.min(PRE_W, g.k * boost); r.w += k * g.w; r.n += k * g.n; r.raw += g.n; }
             m.set(k, r);
         }
-        return fieldH2H.pairs = m;
+        fieldH2H.pairsS = Sx; return fieldH2H.pairs = m;
     }
     function pairH2H(a, b) { // weighted maps a won against b, of n
         const r = fieldPairs().get(a < b ? a + '|' + b : b + '|' + a);
@@ -1742,7 +1697,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             : 'current ladder seeding · dev teams excluded';
         const knownIds = new Set(ladderRows.filter(t => !t.dev && t.hasBot).map(t => t.id));
         const h2hNote = () => fieldH2H.busy ? ` · loading head-to-head ${fieldH2H.done}/${fieldH2H.total} teams…`
-            : ` · head-to-head from ${Object.keys(fieldH2H.groups).length.toLocaleString()} ranked matches (3d, weighted to each pair\'s newest submission; ${teamSubs().size} resubmits seen)`;
+            : ` · head-to-head from ${Object.keys(fieldH2H.groups).length.toLocaleString()} ranked matches (3d, ${predFreezeAt != null && predFreezeAt <= Date.now() ? `weighted around the ${new Date(predFreezeAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} freeze` : 'freeze not yet, recent weighted'})`;
         const pctS = x => x === 0 ? '–' : x >= 0.995 ? '>99%' : x > 0 && x < 0.001 ? '<0.1%' : x < 0.1 ? (x * 100).toFixed(1) + '%' : Math.round(x * 100) + '%';
         const cell = x => h('td', { class: 'p', style: `color:${x > 0.004 ? wrColor(Math.min(1, 0.3 + x * 0.7)) : 'var(--cbc-muted)'}` }, pctS(x));
         function paint() {
@@ -1753,6 +1708,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const games = gamesFor(curFormat); gamesSel.value = String(games);
             for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.dataset.k === fk));
             const F = fieldFor(fk), field = F.field;
+            // submission freeze of the tournament this tab predicts (its snapshot); other tabs have no freeze yet
+            predFreezeAt = upcoming && fk === upcomingKey && (upcoming.snapshotAt || upcoming.qualificationAt) ? Date.parse(upcoming.snapshotAt || upcoming.qualificationAt) : null;
             ensureFieldH2H([...field].sort((a, b) => b.rating - a.rating).map(t => t.id), knownIds);
             if (F.format === 'double') return paintDouble(fk, games, F);
             runId++;
@@ -1798,7 +1755,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                 h('table', { class: 'cbc-ptab' }, h('thead', {}, h('tr', {}, h('th', {}, 'seed'), h('th', {}, 'team'), h('th', {}, 'elo'),
                     ...ks.map(k => h('th', {}, roundName(P.size, R - k + 1).toLowerCase())), h('th', {}, 'win'))),
                     h('tbody', {}, fav.map(i => h('tr', { class: field[i].id === mine.teamId ? 'me' : '' },
-                        h('td', { class: 'mut' }, '#' + field[i].seed), h('td', {}, link(`/game/team/${field[i].id}`, '', field[i].name), subTag(field[i].id)), h('td', { class: 'mut' }, fmt(field[i].rating)),
+                        h('td', { class: 'mut' }, '#' + field[i].seed), h('td', {}, link(`/game/team/${field[i].id}`, '', field[i].name)), h('td', { class: 'mut' }, fmt(field[i].rating)),
                         ...ks.map(k => cell(P.reach[i][R - k])), cell(champ(i)))))))));
             // --- the bracket from the chosen round on
             const from = Math.min(settings.predFrom || 32, P.size);
@@ -1834,7 +1791,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                 grid.append(h('div', { class: 'cbc-card fill' }, h('div', { class: 'in' }, h('h3', {}, 'Title odds'),
                     h('table', { class: 'cbc-ptab' }, h('thead', {}, h('tr', {}, h('th', {}, 'seed'), h('th', {}, 'team'), h('th', {}, 'elo'), h('th', {}, 'top 16'), h('th', {}, 'top 8'), h('th', {}, 'top 4'), h('th', {}, 'top 2'), h('th', {}, 'win'))),
                         h('tbody', {}, fav.map(i => { const f = fr(i); return h('tr', { class: field[i].id === mine.teamId ? 'me' : '' },
-                            h('td', { class: 'mut' }, '#' + field[i].seed), h('td', {}, link(`/game/team/${field[i].id}`, '', field[i].name), subTag(field[i].id)), h('td', { class: 'mut' }, fmt(field[i].rating)),
+                            h('td', { class: 'mut' }, '#' + field[i].seed), h('td', {}, link(`/game/team/${field[i].id}`, '', field[i].name)), h('td', { class: 'mut' }, fmt(field[i].rating)),
                             cell(f[4]), cell(f[3]), cell(f[2]), cell(f[1]), cell(f[0])); }))))));
                 const from = Math.min(settings.predFrom || 32, R.size), colsDE = [];
                 for (let k = from; k >= 1; k /= 2) colsDE.push((R.ubCols[k] || []).map(m => [...m].map(([t, c]) => [t, c / R.done]).sort((a, b) => b[1] - a[1])));
