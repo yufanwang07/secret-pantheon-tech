@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-10.7
+// @version      2026-11-10.8
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -1314,8 +1314,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     // ---------------------------------------------------------------- tournament predictor
     // Projects the next tournament from the current ladder: seeds = ladder order of the eligible field (dev teams are
     // never eligible), standard single-elimination bracket padded to a power of two with byes for the top seeds, every
-    // series best of GAMES. Per-game win chance is the Elo expectation, nudged by our own recent head-to-head games
-    // (Beta prior worth PRIOR_GAMES); the bracket is then solved exactly (a tree of independent subtrees).
+    // series best of GAMES. Per-game win chance is the Elo expectation, pulled toward the pair's real recent head-to-head
+    // (ours from our own match log, everyone else's from their ranked match lists; see fieldPairs); the bracket is then solved exactly (a tree of independent subtrees).
     // Once the upcoming tournament's seeding has frozen, its real field, seeds and bracket slots replace the ladder
     // guess (see frozenSeeding); Elo still comes from the live ladder.
     const PRED_FIELDS = {
@@ -1387,6 +1387,77 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         for (let k = 0; k <= games; k++) { if (k >= need) tot += c * p ** k * (1 - p) ** (games - k); c = c * (games - k) / (k + 1); }
         return tot;
     }
+    // Every pair's recent head-to-head, for the predictor: each field team's ranked match list (the same listing the
+    // team-page matchups card reads; group scores are maps won), deduped by group, kept to games between ladder teams
+    // with a bot, cached in localStorage and topped up incrementally (only groups newer than the last walk are fetched).
+    const FIELD_H2H_SPAN = 2 * 864e5, FIELD_H2H_TTL = 20 * 60e3, FIELD_H2H_PAGES = 16, FIELD_H2H_TEAMS = 48, H2H_PRIOR_MAPS = 10;
+    const fieldH2H = (() => {
+        // stored compactly: team ids once, groups as [seconds since t0, team index a, team index b, wins a, wins b]
+        const groups = {}; let c = null;
+        try { c = JSON.parse(localStorage.getItem(LS + 'fieldH2H') || 'null'); } catch { }
+        if (c?.v === 2) for (const [dt, ai, bi, wa, wb] of c.g) { const t = c.t0 + dt * 1000; groups[h2hKey(t, c.ids[ai], c.ids[bi])] = [t, c.ids[ai], c.ids[bi], wa, wb]; }
+        return { groups, teams: c?.v === 2 ? c.teams : {}, busy: null, done: 0, total: 0, pairs: null, listeners: new Set() };
+    })();
+    function h2hKey(t, a, b) { return Math.round(t / 1000) + a.slice(0, 8) + b.slice(0, 8); } // one group seen from both teams
+    function saveFieldH2H() {
+        const cut = Date.now() - FIELD_H2H_SPAN, ids = [], ix = new Map(), g = [];
+        const at = id => ix.get(id) ?? (ix.set(id, ids.length), ids.push(id), ids.length - 1);
+        for (const [k, r] of Object.entries(fieldH2H.groups)) if (r[0] < cut) delete fieldH2H.groups[k];
+        const rows = Object.values(fieldH2H.groups), t0 = Math.min(Date.now(), ...rows.map(r => r[0]));
+        for (const [t, a, b, wa, wb] of rows) g.push([Math.round((t - t0) / 1000), at(a), at(b), wa, wb]);
+        try { localStorage.setItem(LS + 'fieldH2H', JSON.stringify({ v: 2, t0, ids, g, teams: fieldH2H.teams })); } catch { }
+    }
+    function ensureFieldH2H(ids, known) { // ids: teams to walk (strongest first); known: ids an opponent must be one of
+        const stale = ids.slice(0, FIELD_H2H_TEAMS).filter(id => !(Date.now() - (fieldH2H.teams[id]?.at || 0) < FIELD_H2H_TTL));
+        if (!stale.length || fieldH2H.busy) return fieldH2H.busy;
+        fieldH2H.done = 0; fieldH2H.total = stale.length;
+        const walk = async id => {
+            const prev = fieldH2H.teams[id]?.newest || 0, cut = Math.max(prev, Date.now() - FIELD_H2H_SPAN);
+            let before = null, newest = prev;
+            for (let page = 0; page < FIELD_H2H_PAGES; page++) {
+                const d = await api(`/match-groups?scope=all&team=${id}&status=finished&kind=ranked` + (before ? `&before=${encodeURIComponent(before)}` : ''));
+                let old = false;
+                for (const g of d.groups || []) {
+                    const t = Date.parse(g.finishedAt || g.createdAt);
+                    if (t <= cut) { old = true; continue; }
+                    newest = Math.max(newest, t);
+                    const [a, b] = g.sides || [];
+                    if (!a?.teamId || !b?.teamId || !known.has(a.teamId) || !known.has(b.teamId)) continue;
+                    fieldH2H.groups[h2hKey(t, a.teamId, b.teamId)] = [t, a.teamId, b.teamId, a.wins || 0, b.wins || 0];
+                }
+                if (old || !d.more) break;
+                before = d.next;
+            }
+            fieldH2H.teams[id] = { at: Date.now(), newest };
+        };
+        fieldH2H.busy = (async () => {
+            const q = [...stale];
+            await Promise.all([0, 1, 2, 3].map(async () => {
+                for (let id; (id = q.shift());) {
+                    try { await walk(id); } catch { fieldH2H.teams[id] = { ...fieldH2H.teams[id], at: Date.now() }; } // retry after the TTL, not every repaint
+                    fieldH2H.done++; fieldH2H.listeners.forEach(f => f(false));
+                }
+            }));
+            fieldH2H.pairs = null; saveFieldH2H();
+        })().finally(() => { fieldH2H.busy = null; fieldH2H.listeners.forEach(f => f(true)); });
+        return fieldH2H.busy;
+    }
+    // pair key "lo|hi" (ids sorted) -> { w: maps won by lo, n: maps, g: groups } over the cached window
+    function fieldPairs() {
+        if (fieldH2H.pairs) return fieldH2H.pairs;
+        const m = new Map(), cut = Date.now() - FIELD_H2H_SPAN;
+        for (const [t, a, b, wa, wb] of Object.values(fieldH2H.groups)) {
+            if (t < cut || wa + wb === 0) continue;
+            const flip = a > b, k = flip ? b + '|' + a : a + '|' + b;
+            const r = m.get(k) || m.set(k, { w: 0, n: 0, g: 0 }).get(k);
+            r.w += flip ? wb : wa; r.n += wa + wb; r.g++;
+        }
+        return fieldH2H.pairs = m;
+    }
+    function pairH2H(a, b) { // maps a won against b, of n
+        const r = fieldPairs().get(a < b ? a + '|' + b : b + '|' + a);
+        return !r ? null : a < b ? r : { w: r.n - r.w, n: r.n, g: r.g };
+    }
     // Which of our bot versions the predictor's head-to-head uses: the chosen one, else the active bot.
     const predVersion = () => { const v = settings.predVer; return v != null && v !== '' && stats.recs.some(r => r.ver === +v) ? +v : stats.main; };
     function predictPairs(field, games, mineId) {
@@ -1403,7 +1474,12 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const vs = A.id === mineId ? h2h.get(B.id) : B.id === mineId ? h2h.get(A.id) : null;
             if (vs?.length) { // our real results dominate: the Elo guess only counts as US_PRIOR_GAMES games
                 const pm = A.id === mineId ? p : 1 - p, d = mapNormWR(vs).wr;
-                const post = (US_PRIOR_GAMES * pm + vs.length * d) / (US_PRIOR_GAMES + vs.length); p = A.id === mineId ? post : 1 - post; }
+                const post = (US_PRIOR_GAMES * pm + vs.length * d) / (US_PRIOR_GAMES + vs.length); p = A.id === mineId ? post : 1 - post;
+            } else { // everyone else (and us, when the chosen version hasn't met them): their recent ranked maps against
+                // each other, with the Elo guess worth H2H_PRIOR_MAPS maps
+                const r = pairH2H(A.id, B.id);
+                if (r?.n) p = (H2H_PRIOR_MAPS * p + r.w) / (H2H_PRIOR_MAPS + r.n);
+            }
             v = seriesP(p, games);
             pcache.set(key, v); pcache.set(b * 4096 + a, 1 - v);
             return v;
@@ -1412,7 +1488,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
     }
     // Double elimination (UK / International): sampled, since a team's path depends on who else has lost.
     // Upper bracket as in single elim; losers bracket alternates "drop-in" rounds (survivors vs the newest upper-
-    // bracket losers, in reversed order to dodge rematches) and plain rounds; grand final with no reset.
+    // bracket losers; every other drop-in round swaps the halves to dodge rematches) and plain rounds; grand final with no reset.
     // place = 1 + teams still alive after the round a team went out in (so top4 = place <= 4).
     function simulateDE(field, games, mineId, sims, onDone, slots = seedSlots(field)) {
         const n = field.length, size = slots.length;
@@ -1593,6 +1669,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             .sort((a, b) => b.rating - a.rating).map((t, i) => ({ ...t, seed: i + 1 })), format: formatFor(fk) };
         const seedNote = F => F.slots ? `frozen tournament seeding (${F.fromBracket ? 'platform bracket' : 'seeds'}, captured ${new Date(F.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`
             : 'current ladder seeding · dev teams excluded';
+        const knownIds = new Set(ladderRows.filter(t => !t.dev && t.hasBot).map(t => t.id));
+        const h2hNote = () => fieldH2H.busy ? ` · loading head-to-head ${fieldH2H.done}/${fieldH2H.total} teams…`
+            : ` · head-to-head from ${Object.keys(fieldH2H.groups).length.toLocaleString()} ranked matches (2d)`;
         const pctS = x => x === 0 ? '–' : x >= 0.995 ? '>99%' : x > 0 && x < 0.001 ? '<0.1%' : x < 0.1 ? (x * 100).toFixed(1) + '%' : Math.round(x * 100) + '%';
         const cell = x => h('td', { class: 'p', style: `color:${x > 0.004 ? wrColor(Math.min(1, 0.3 + x * 0.7)) : 'var(--cbc-muted)'}` }, pctS(x));
         function paint() {
@@ -1603,9 +1682,10 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const games = gamesFor(curFormat); gamesSel.value = String(games);
             for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.dataset.k === fk));
             const F = fieldFor(fk), field = F.field;
+            ensureFieldH2H([...field].sort((a, b) => b.rating - a.rating).map(t => t.id), knownIds);
             if (F.format === 'double') return paintDouble(fk, games, F);
             runId++;
-            subLine.textContent = `${upcoming && upcomingKey === fk ? upcoming.name + ' · ' : ''}${seedNote(F)} · single elimination · exact solve`;
+            subLine.textContent = `${upcoming && upcomingKey === fk ? upcoming.name + ' · ' : ''}${seedNote(F)} · single elimination · exact solve${h2hNote()}`;
             const t0 = performance.now();
             const P = predict(field, games, mine.teamId, F.slots);
             const ms = Math.round(performance.now() - t0);
@@ -1659,7 +1739,7 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         function paintDouble(fk, games, F) {
             const field = F.field;
             const my = ++runId, SIMS = 20000;
-            subLine.textContent = `${upcoming && upcomingKey === fk ? upcoming.name + ' · ' : ''}${seedNote(F)} · double elimination (no reset) · ${SIMS.toLocaleString()} simulations`;
+            subLine.textContent = `${upcoming && upcomingKey === fk ? upcoming.name + ' · ' : ''}${seedNote(F)} · double elimination (no reset) · ${SIMS.toLocaleString()} simulations${h2hNote()}`;
             const idx = field.findIndex(t => t.id === mine.teamId);
             simulateDE(field, games, mine.teamId, SIMS, R => {
                 if (my !== runId || mounted?.key !== key) return;
@@ -1910,7 +1990,10 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         paint();
         const onStats = () => { if (!stats.loading) paint(); };
         stats.listeners.add(onStats);
-        const d0 = mounted.destroy; mounted.destroy = () => { stats.listeners.delete(onStats); runId++; d0(); };
+        const onH2H = fin => { if (mounted?.key !== key) return; if (fin) paint(); else if (subLine.textContent.includes('loading head-to-head'))
+            subLine.textContent = subLine.textContent.replace(/ · loading head-to-head.*$/, h2hNote()); };
+        fieldH2H.listeners.add(onH2H);
+        const d0 = mounted.destroy; mounted.destroy = () => { stats.listeners.delete(onStats); fieldH2H.listeners.delete(onH2H); runId++; d0(); };
         return true;
     }
     function predictorNav() {
