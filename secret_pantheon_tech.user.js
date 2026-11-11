@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-10.6
+// @version      2026-11-10.7
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -1439,7 +1439,9 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
             const out = (loser, by, after) => { const pl = after + 1; const p = place[loser];
                 if (pl <= 2) p[1]++; if (pl <= 4) p[2]++; if (pl <= 8) p[3]++; if (pl <= 16) p[4]++; p[5] += pl;
                 elimBy[loser].set(by, (elimBy[loser].get(by) || 0) + 1); };
-            let ub = slots.slice(), lb = null, dropFlip = false, lr = 0, ur = 0;
+            // drop-ins as the platform pairs them (its UK/International qualifier brackets): the first drop-in round swaps
+            // halves (upper loser i meets lower slot (i + n/2) mod n), the next goes straight across, alternating
+            let ub = slots.slice(), lb = null, dropFlip = true, lr = 0, ur = 0;
             while (ub.length > 1) {
                 const nu = [], losers = [];
                 const trackU = ub.length <= 64;
@@ -1451,7 +1453,8 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
                 if (ub.length <= 64) { const c = ubCols[ub.length] ??= ub.map(() => new Map()); ub.forEach((t, k) => { if (t != null) c[k].set(t, (c[k].get(t) || 0) + 1); }); }
                 if (lb == null) lb = losers; // first round's losers seed the losers bracket
                 else { // drop-in round
-                    const drops = dropFlip ? losers.slice().reverse() : losers; dropFlip = !dropFlip;
+                    const half = losers.length >> 1;
+                    const drops = dropFlip && half ? losers.slice(half).concat(losers.slice(0, half)) : losers; dropFlip = !dropFlip;
                     const nl = [], elim = [];
                     if (lb.length <= 32) { lbM[lr] ??= { drop: true, pairs: [] }; noteM(lbM[lr].pairs, lb.map((a, i) => [a, drops[i]])); }
                     for (let i = 0; i < lb.length; i++) { const a = lb[i], b = drops[i], w = play(a, b); nl.push(w); if (a != null && b != null) elim.push([w === a ? b : a, w]);
@@ -1566,6 +1569,12 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         try {
             const ts = (await api('/tournaments')).tournaments || [];
             upcoming = ts.filter(t => t.status !== 'complete').sort((a, b) => Date.parse(a.qualificationAt || a.seedingEndsAt) - Date.parse(b.qualificationAt || b.seedingEndsAt))[0] || null;
+            // none scheduled: the latest tournament that has run but whose matches are still hidden ("unpublished",
+            // e.g. a qualifier held back for the stream) is still a prediction, with its frozen seeds
+            if (!upcoming) for (const t of ts.filter(t => t.seededAt).sort((a, b) => Date.parse(b.seededAt) - Date.parse(a.seededAt)).slice(0, 2)) {
+                const d = await predTournament(t.id).catch(() => null);
+                if ((d?.bracket || []).some(m => m.status === 'unpublished')) { upcoming = t; break; }
+            }
         } catch { }
         const upcomingKey = !upcoming ? 'sprint' : upcoming.kind === 'sprint' || upcoming.eligibility === 'sprint' ? 'sprint'
             : (upcoming.eligibilityGroups || []).length === 1 && PRED_FIELDS[upcoming.eligibilityGroups[0]] ? upcoming.eligibilityGroups[0] : 'finals';
