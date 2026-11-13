@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         secret pantheon tech
 // @namespace    prominence-chan/cambc
-// @version      2026-11-11.4
+// @version      2026-11-13.1
 // @description  Compact Florent-style team, matches and ladder pages for Cambridge Battlecode in its own theme, plus stats (win rate by map, vs champion, champion picks), head-to-head on the ladder, quick unranked challenges and a tournament predictor (single/double elimination, title odds, most common bracket).
 // @match        https://2026a.battlecode.co.uk/game/*
 // @match        https://*.battlecode.co.uk/game/*
@@ -1795,10 +1795,14 @@ table:has(tr[data-ladder-team]) thead th:first-child .cbc-vsus { font-weight: 40
         // qualifiers and finals are double elimination: the upcoming one's own format wins over the tab's default
         const formatFor = fk => { const t = tabData.get(fk)?.t || (upcoming && fk === upcomingKey ? upcoming : null);
             return t?.elimination || (t && t.kind !== 'sprint' ? 'double' : PRED_FIELDS[fk].format); };
-        const fieldFor = fk => tabData.get(fk)?.frozen ? { ...tabData.get(fk).frozen, format: formatFor(fk) } : { field: ladderRows.filter(t => !t.dev && t.hasBot && PRED_FIELDS[fk].test(t))
-            .sort((a, b) => b.rating - a.rating).map((t, i) => ({ ...t, seed: i + 1 })), format: formatFor(fk) };
+        // Finals: only the teams that qualified (top 8 of each finished qualifier; Yufan, 11-13), not every uk/intl team
+        let qualMap = null;
+        try { qualMap = (await qualified()).map; } catch { }
+        const inField = (fk, t) => fk === 'finals' && qualMap?.size ? qualMap.has(t.id) : PRED_FIELDS[fk].test(t);
+        const fieldFor = fk => tabData.get(fk)?.frozen ? { ...tabData.get(fk).frozen, format: formatFor(fk) } : { field: ladderRows.filter(t => !t.dev && t.hasBot && inField(fk, t))
+            .sort((a, b) => b.rating - a.rating).map((t, i) => ({ ...t, seed: i + 1 })), format: formatFor(fk), qualOnly: fk === 'finals' && !!qualMap?.size };
         const seedNote = F => F.slots ? `frozen tournament seeding (${F.fromBracket ? 'platform bracket' : 'seeds'}, captured ${new Date(F.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`
-            : 'current ladder seeding · dev teams excluded';
+            : `current ladder seeding · ${F.qualOnly ? `qualified teams only (${F.field.length} of ${qualMap.size})` : 'dev teams excluded'}`;
         const liveNote = F => !F.slots ? '' : settings.predPure ? ' · pure prediction (results hidden)'
             : predKnown.size ? ` · live: ${predKnown.size} played match${predKnown.size === 1 ? '' : 'es'} locked in` : ' · live (no results yet)';
         const knownIds = new Set(ladderRows.filter(t => !t.dev && t.hasBot).map(t => t.id));
